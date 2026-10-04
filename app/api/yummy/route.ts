@@ -11,9 +11,9 @@ async function registerStream(url:string,referer:string){
  return redis?`/api/stream?token=${token}`:url;
 }
 
-async function registerSources(sources:{quality:string,url:string}[],referer:string){
+async function registerSources(sources:{quality:string,url:string,kind?:string}[],referer:string){
  const out=[] as {quality:string,url:string}[];
- for(const source of sources){const proxy=await registerStream(source.url,referer);const kind=/\.m3u8(?:$|\?)/i.test(source.url)?"m3u8":/\.mp4(?:$|\?)/i.test(source.url)?"mp4":"media";out.push({quality:source.quality,url:proxy+(proxy.startsWith("/api/stream?")?"&type="+kind:""),kind} as any)}
+ for(const source of sources){const proxy=await registerStream(source.url,referer);const kind=source.kind||(/\.m3u8(?:$|\?)/i.test(source.url)?"m3u8":/\.mp4(?:$|\?)/i.test(source.url)?"mp4":"media");out.push({quality:source.quality,url:proxy+(proxy.startsWith("/api/stream?")?"&type="+kind:""),kind} as any)}
  return out;
 }
 const UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/149.0.0.0 Safari/537.36";
@@ -27,13 +27,30 @@ async function fetchText(url:string,options:RequestInit={}){const r=await fetch(
 
 function decodeKodikSrc(src:string){if(!src)return "";if(src.includes("//"))return src;try{let x=String(src).split("").map(ch=>{if(!/[a-z]/i.test(ch))return ch;let n=ch.charCodeAt(0)+18;const max=ch<="Z"?90:122;if(n>max)n-=26;return String.fromCharCode(n)}).join("");x+="=".repeat((4-x.length%4)%4);return Buffer.from(x,"base64").toString("utf8")}catch{return ""}}
 
+async function inspectAksorSource(url:string,referer:string){
+ try{
+  const r=await fetch(url,{headers:{"User-Agent":UA,Referer:referer,Accept:"*/*",Range:"bytes=0-511"},cache:"no-store"});
+  const type=(r.headers.get("content-type")||"").toLowerCase();
+  const buf=Buffer.from(await r.arrayBuffer());
+  const head=buf.toString("utf8",0,Math.min(buf.length,512));
+  if(head.trimStart().startsWith("#EXTM3U")||type.includes("mpegurl"))return "m3u8";
+  if(type.includes("video/mp4")||type.includes("video/")||buf.subarray(4,8).toString("ascii")==="ftyp")return "mp4";
+  if(type.includes("application/octet-stream")&&(buf.subarray(4,8).toString("ascii")==="ftyp"||buf.subarray(0,4).toString("ascii")==="RIFF"))return "mp4";
+  return `bad:${r.status}:${type||"unknown"}:${head.replace(/\\s+/g," ").slice(0,40)}`;
+ }catch(e){return `error:${e instanceof Error?e.message:"unknown"}`}
+}
+
 async function resolveAksor(raw:string){
  const full=normalizeUrl(raw);let u:URL;try{u=new URL(full)}catch{throw new Error("Aksor: некорректная ссылка")}
  const p=u.pathname.split("/").filter(Boolean),i=p.indexOf("video"),hash=i>=0?p[i+1]:p[p.length-1];if(!hash)throw new Error("Aksor: не найден id видео");
  let payload:any;try{payload=JSON.parse(await fetchText("https://player.aksor.tv/api/video/"+encodeURIComponent(hash),{headers:{Referer:full,Accept:"application/json"}}))}catch(e){throw new Error(`Aksor API: ${e instanceof Error?e.message:"ошибка"}`)}
  const q=payload?.qualities||{},out:{quality:string,url:string}[]=[];
  for(const [quality,key] of [["360p","q360"],["480p","q480"],["720p","q720"],["1080p","q1080"],["2K","q2k"],["4K","q4k"]]){const url=decodeHtmlUrl(String(q[key]||"").trim()).replace(/ /g,"%20");if(url&&url.toLowerCase()!=="null"&&/^https?:\/\//i.test(url))out.push({quality,url})}
- if(!out.length)throw new Error("Aksor: API не вернул ссылок видео");return out
+ if(!out.length)throw new Error("Aksor: API не вернул ссылок видео");
+ const checked:{quality:string,url:string,kind:string}[]=[];
+ for(const source of out){const kind=await inspectAksorSource(source.url,full);if(kind==="m3u8"||kind==="mp4")checked.push({...source,kind});}
+ if(!checked.length)throw new Error("Aksor: сервер видео не отдал MP4/M3U8 (поток может быть защищён или временно недоступен)");
+ return checked
 }
 
 async function resolveKodik(raw:string){
