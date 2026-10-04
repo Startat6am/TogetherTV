@@ -53,24 +53,64 @@ export async function GET(req:NextRequest){
   if(!token)return new NextResponse("Missing token",{status:400});
   const entry=await getEntry(token);
   if(!entry?.url){console.warn("[TogetherTV stream] Stream token unavailable",JSON.stringify({tokenPresent:Boolean(token),redisConfigured:Boolean(redis)}));return new NextResponse("Stream expired",{status:404});}
+
+  const range=req.headers.get("range");
   let upstream:Response;
   try{
-    const headers:Record<string,string>={"User-Agent":UA,"Accept":"*/*"};
+    const headers:Record<string,string>={
+      "User-Agent":UA,
+      "Accept":"*/*",
+      "Accept-Encoding":"identity",
+    };
     if(entry.referer)headers.Referer=entry.referer;
-    const range=req.headers.get("range");if(range)headers.Range=range;
+    if(range)headers.Range=range;
     upstream=await fetch(entry.url,{headers,cache:"no-store"});
-  }catch(e){console.error("[TogetherTV stream] Upstream fetch failed",e instanceof Error?e.message:"unknown");return new NextResponse("Upstream unavailable",{status:502})}
-  if(!upstream.ok&&upstream.status!==206)return new NextResponse(`Upstream HTTP ${upstream.status}`,{status:upstream.status});
-  const type=upstream.headers.get("content-type")||"";const forced=req.nextUrl.searchParams.get("type")||"";
+  }catch(e){
+    console.error("[TogetherTV stream] Upstream fetch failed",e instanceof Error?e.message:"unknown");
+    return new NextResponse("Upstream unavailable",{status:502});
+  }
+
+  if(!upstream.ok&&upstream.status!==206){
+    console.warn("[TogetherTV stream] Upstream HTTP error",JSON.stringify({status:upstream.status,hasRange:Boolean(range)}));
+    return new NextResponse(`Upstream HTTP ${upstream.status}`,{status:upstream.status});
+  }
+
+  const type=upstream.headers.get("content-type")||"";
+  const forced=req.nextUrl.searchParams.get("type")||"";
   const isManifest=/mpegurl|\.m3u8/i.test(type)||/\.m3u8(?:$|\?)/i.test(entry.url);
+
   if(isManifest){
     const text=await upstream.text();
     const rewritten=await rewriteManifest(text,entry.url,entry.referer);
-    return new NextResponse(rewritten,{status:200,headers:{"Content-Type":"application/vnd.apple.mpegurl","Cache-Control":"no-store","Access-Control-Allow-Origin":"*"}});
+    return new NextResponse(rewritten,{status:200,headers:{
+      "Content-Type":"application/vnd.apple.mpegurl",
+      "Cache-Control":"no-store",
+      "Access-Control-Allow-Origin":"*",
+      "Access-Control-Expose-Headers":"Content-Length, Content-Range, Accept-Ranges, Content-Type",
+    }});
   }
-  const headers=new Headers();
-  for(const name of ["content-type","content-length","content-range","accept-ranges","etag","last-modified"]){const value=upstream.headers.get(name);if(value)headers.set(name,value)}
-  headers.set("Cache-Control","no-store");
-  headers.set("Access-Control-Allow-Origin","*");
-  return new NextResponse(upstream.body,{status:upstream.status,headers});
+
+  const responseType=forced==="mp4"?"video/mp4":(type.split(";")[0]||"video/mp4");
+  const responseHeaders=new Headers();
+  responseHeaders.set("Content-Type",responseType);
+  responseHeaders.set("Accept-Ranges",upstream.headers.get("accept-ranges")||"bytes");
+  for(const name of ["content-length","content-range","etag","last-modified"]){
+    const value=upstream.headers.get(name);
+    if(value)responseHeaders.set(name,value);
+  }
+  responseHeaders.set("Cache-Control","no-store");
+  responseHeaders.set("Access-Control-Allow-Origin","*");
+  responseHeaders.set("Access-Control-Expose-Headers","Content-Length, Content-Range, Accept-Ranges, Content-Type");
+  responseHeaders.set("Cross-Origin-Resource-Policy","cross-origin");
+
+  console.info("[TogetherTV stream] Upstream video response",JSON.stringify({
+    status:upstream.status,
+    requestedRange:Boolean(range),
+    contentType:responseType,
+    contentLength:upstream.headers.get("content-length")||null,
+    contentRange:upstream.headers.get("content-range")||null,
+    acceptRanges:upstream.headers.get("accept-ranges")||null,
+  }));
+
+  return new NextResponse(upstream.body,{status:upstream.status,headers:responseHeaders});
 }
