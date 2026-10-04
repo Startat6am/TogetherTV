@@ -47,8 +47,94 @@ async function resolveAksor(raw:string){
  return checked
 }
 
-async function resolveKodik(raw:string){const full=normalizeUrl(raw);let u:URL;try{u=new URL(full)}catch{throw new Error("Kodik: некорректную ссылку")}const html=await fetchText(full,{headers:{Accept:"text/html,application/xhtml+xml,*/*;q=0.8",Referer:"https://yani.tv/"} }),flat=html.replace(/[\r\n]/g,"");const pick=(re:RegExp)=>re.exec(flat)?.[1]||"";const urlParamsRaw=pick(/\burlParams\s*=\s*['"]([^'"]+)['"]/),type=pick(/\b(?:videoInfo|vInfo)\.type\s*=\s*['"]([^'"]+)['"]/),hash=pick(/\b(?:videoInfo|vInfo)\.hash\s*=\s*['"]([^'"]+)['"]/),id=pick(/\b(?:videoInfo|vInfo)\.id\s*=\s*['"]([^'"]+)['"]/),playerSrc=pick(/src=["']((?:(?:https?:)?\/\/[^"']+)?\/assets\/js\/app\.player_single[^"']+)["']/i);if(!urlParamsRaw||!type||!hash||!id||!playerSrc)throw new Error("Kodik: не найдены параметры player");let up:any;try{up=JSON.parse(urlParamsRaw)}catch{throw new Error("Kodik: повреждены urlParams")}const scriptUrl=absoluteUrl(playerSrc,u.origin),playerOrigin=scriptUrl.split("/assets/js/")[0]||u.origin,script=await fetchText(scriptUrl,{headers:{Referer:full}});let endpoint="/ftor";const re=/atob\(["']([A-Za-z0-9+/=]+)["']\)/g;let m:RegExpExecArray|null;while((m=re.exec(script))){try{const d=Buffer.from(m[1],"base64").toString("utf8").trim();if(d.startsWith("/")&&d.length<=20&&!d.includes("//")){endpoint=d;break}}catch{}}const body=new URLSearchParams({d:String(up.d||""),d_sign:String(up.d_sign||""),pd:String(up.pd||""),pd_sign:String(up.pd_sign||""),ref:decodeURIComponent(String(up.ref||"")),ref_sign:String(up.ref_sign||""),bad_user:"true",cdn_is_working:"true",type,hash,id,info:"{}"});const ep=new URL(endpoint,playerOrigin),r=await fetch(ep.toString(),{method:"POST",headers:{"User-Agent":UA,"Referer":full,"Origin":playerOrigin,Accept:"application/json,text/javascript,*/*;q=0.01","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","X-Requested-With":"XMLHttpRequest"},body:body.toString(),cache:"no-store"}),txt=(await r.text()).trim();if(!r.ok)throw new Error(`Kodik resolver: HTTP ${r.status} (${endpoint})`);let json:any;try{json=JSON.parse(txt.replace(/^\uFEFF/,""))}catch{throw new Error(`Kodik resolver: сервер вернул не JSON (${txt.slice(0,80).replace(/\s+/g," ")})`)}const out:{quality:string,url:string}[]=[];for(const [quality,arr] of Object.entries(json?.links||{})){const item:any=Array.isArray(arr)?arr[0]:null,url=decodeKodikSrc(String(item?.src||""));if(/^https?:\/\//i.test(url))out.push({quality,url})}if(!out.length)throw new Error("Kodik: resolver не вернул видеопоток");return out}
-function decodeKodikSrc(src:string){if(!src)return "";if(src.includes("//"))return src;try{let x=String(src).split("").map(ch=>{if(!/[a-z]/i.test(ch))return ch;let n=ch.charCodeAt(0)+18;const max=ch<="Z"?90:122;if(n>max)n-=26;return String.fromCharCode(n)}).join("");x+="=".repeat((4-x.length%4)%4);return Buffer.from(x,"base64").toString("utf8")}catch{return ""}}
+async function resolveKodik(raw:string){
+ const full=normalizeUrl(raw);
+ let u:URL;
+ try{u=new URL(full)}catch{throw new Error("Kodik: некорректная ссылка")}
+ const html=await fetchText(full,{headers:{Accept:"text/html,application/xhtml+xml,*/*;q=0.8",Referer:"https://yani.tv/"}});
+ const flat=html.replace(/[\\r\\n]/g,"");
+ const pick=(re:RegExp)=>re.exec(flat)?.[1]||"";
+
+ const urlParamsRaw=pick(/\\burlParams\\s*=\\s*['"]([^'"]+)['"]/);
+ const typeFromPage=pick(/\\b(?:videoInfo|vInfo)\\.type\\s*=\\s*['"]([^'"]+)['"]/);
+ const hashFromPage=pick(/\\b(?:videoInfo|vInfo)\\.hash\\s*=\\s*['"]([^'"]+)['"]/);
+ const idFromPage=pick(/\\b(?:videoInfo|vInfo)\\.id\\s*=\\s*['"]([^'"]+)['"]/);
+
+ const pathParts=u.pathname.split("/").filter(Boolean);
+ const qualityPart=pathParts.find(x=>/^\\d+p$/i.test(x))||"";
+ const quality=qualityPart.replace(/p$/i,"");
+ const type=typeFromPage||((pathParts[0]||"").toLowerCase()==="video"?"video":(pathParts[0]||"seria"));
+ const hash=hashFromPage||pathParts[pathParts.length-2]||"";
+ const id=idFromPage||pathParts[pathParts.length-3]||"";
+ if(!type||!hash||!id)throw new Error("Kodik: не найдены type/hash/id");
+
+ let up:any={};
+ if(urlParamsRaw){
+  try{up=JSON.parse(urlParamsRaw)}catch{throw new Error("Kodik: повреждены urlParams")}
+ }
+
+ const playerSrc=pick(/src=["']((?:(?:https?:)?\\/\\/[^"']+)?\\/assets\\/js\\/app\\.player_single\\.[^"']+\\.js)["']/i);
+ if(!playerSrc)throw new Error("Kodik: не найден player_single");
+ const scriptUrl=absoluteUrl(playerSrc,u.origin);
+ const script=await fetchText(scriptUrl,{headers:{Referer:full}});
+
+ // Kodik deliberately changes the endpoint. Do not guess it: read the exact
+ // POST target from the current player script. Modern players fall back to
+ // /kor when the script no longer embeds an endpoint.
+ const endpointMatch=/type:"POST",url:atob\\("(?<b64str>[^"]+)"\\)/i.exec(script);
+ const endpoint=endpointMatch?.groups?.b64str?Buffer.from(endpointMatch.groups.b64str,"base64").toString("utf8").trim():"/kor";
+ if(!endpoint.startsWith("/"))throw new Error("Kodik: player вернул некорректный endpoint");
+
+ let json:any;
+ if(endpoint==="/kor" && !urlParamsRaw){
+  const query=new URLSearchParams({type,id,hash});
+  if(quality)query.set("quality",quality);
+  const response=await fetch(new URL(endpoint+"?"+query.toString(),u.origin),{
+   headers:{"User-Agent":UA,"Referer":full,"Accept":"application/json,text/plain,*/*;q=0.8"},
+   cache:"no-store"
+  });
+  const txt=(await response.text()).trim();
+  if(!response.ok)throw new Error(`Kodik resolver: HTTP ${response.status} (${endpoint})`);
+  try{json=JSON.parse(txt.replace(/^\\uFEFF/,""))}catch{throw new Error(`Kodik resolver: сервер вернул не JSON (${txt.slice(0,120).replace(/\\s+/g," ")})`)}
+ }else{
+  if(!urlParamsRaw)throw new Error("Kodik: для этого endpoint не найдены urlParams");
+  const body=new URLSearchParams({
+   d:String(up.d||""),
+   d_sign:String(up.d_sign||""),
+   pd:String(up.pd||""),
+   pd_sign:String(up.pd_sign||""),
+   ref:decodeURIComponent(String(up.ref||"")),
+   ref_sign:String(up.ref_sign||""),
+   bad_user:"false",
+   cdn_is_working:"true",
+   type,
+   hash,
+   id,
+   info:"{}"
+  });
+  const ep=new URL(endpoint,u.origin);
+  const response=await fetch(ep.toString(),{
+   method:"POST",
+   headers:{"User-Agent":UA,"Referer":full,"Origin":u.origin,Accept:"application/json,text/javascript,*/*;q=0.01","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","X-Requested-With":"XMLHttpRequest"},
+   body:body.toString(),
+   cache:"no-store"
+  });
+  const txt=(await response.text()).trim();
+  if(!response.ok)throw new Error(`Kodik resolver: HTTP ${response.status} (${endpoint})`);
+  try{json=JSON.parse(txt.replace(/^\\uFEFF/,""))}catch{throw new Error(`Kodik resolver: сервер вернул не JSON (${txt.slice(0,120).replace(/\\s+/g," ")})`)}
+ }
+
+ const out:{quality:string,url:string}[]=[];
+ for(const [q,arr] of Object.entries(json?.links||{})){
+  const item:any=Array.isArray(arr)?arr.find((x:any)=>x?.src):null;
+  const url=decodeKodikSrc(String(item?.src||""));
+  if(/^https?:\\/\\//i.test(url))out.push({quality:q,url});
+ }
+ if(!out.length)throw new Error(`Kodik: endpoint ${endpoint} не вернул видеопоток`);
+ console.info("[TogetherTV Kodik resolve]",JSON.stringify({host:u.hostname,endpoint,type,id,hash,qualities:out.map(x=>x.quality)}));
+ return out;
+}
+function decodeKodikSrc(src:string){if(!src)return "";if(src.startsWith("//"))return "https:"+src;if(/^https?:\\/\\//i.test(src))return src;try{let x=String(src).split("").map(ch=>{if(!/[a-z]/i.test(ch))return ch;let n=ch.charCodeAt(0)+18;const max=ch<="Z"?90:122;if(n>max)n-=26;return String.fromCharCode(n)}).join("");x+="=".repeat((4-x.length%4)%4);return Buffer.from(x,"base64").toString("utf8")}catch{return ""}}
 async function resolvePlayer(raw:string){const iframe=normalizeUrl(raw);let host="";try{host=new URL(iframe).hostname.toLowerCase()}catch{throw new Error("Плеер вернул некорректную ссылку")}if(host.includes("aksor"))return resolveAksor(iframe);if(host.includes("kodik"))return resolveKodik(iframe);throw new Error(`Неподдерживаемый плеер: ${host}`)}
 
 export async function POST(req:NextRequest){
