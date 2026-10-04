@@ -26,7 +26,7 @@ async function inspectAksorSource(url:string,referer:string){
   const signature=buf.subarray(0,16).toString("hex");
   const looksManifest=head.trimStart().startsWith("#EXTM3U")||type.includes("mpegurl");
   if(looksManifest)return "m3u8";
-  const looksDash=/^\\s*(?:<\\?xml[^>]*>\\s*)?<MPD\\b/i.test(head);
+  const looksDash=/^\s*(?:<\?xml[^>]*>\s*)?<MPD\b/i.test(head);
   if(looksDash||type.includes("dash+xml"))return "mpd";
   const isIsoBmff=ftyp==="ftyp" && buf.length>=12; const hasMoov=buf.includes(Buffer.from("moov")); const hasMdat=buf.includes(Buffer.from("mdat")); if(isIsoBmff && (hasMoov||hasMdat) && (buf.length>=8192 || contentRange.includes("/")))return "mp4";
   if(type.includes("application/octet-stream")&&isIsoBmff&&buf.length>=8192)return "mp4";
