@@ -7,7 +7,8 @@ type State={url:string;playing:boolean;position:number;updatedAt:number;title:st
 type Anime=Record<string,any>;
 const initial:State={url:"",playing:false,position:0,updatedAt:Date.now(),title:"Пока ничего не включено"};
 function pick<T=any>(obj:any,keys:string[],fallback?:T):T{for(const key of keys)if(obj?.[key]!==undefined&&obj?.[key]!==null)return obj[key] as T;return fallback as T}
-function unwrap(data:any):any{return data?.response??data?.data?.response??data?.data??data}
+function unwrap(data:any):any{let value=data;for(let i=0;i<6;i++){const next=value?.response??value?.data;if(!next||next===value)break;value=next}return value}
+function findVideos(value:any,depth=0):any[]{if(!value||depth>6)return [];if(Array.isArray(value.videos))return value.videos;for(const key of ["response","data","anime","result","item"]){const found=findVideos(value[key],depth+1);if(found.length)return found}return []}
 function animeName(a:any){const n=pick(a,["title","name","title_ru","russian"],"Без названия");return typeof n==="object"?pick(n,["ru","russian","english","original"],"Без названия"):n}
 
 export default function Home(){
@@ -42,7 +43,7 @@ export default function Home(){
  const install=async()=>{if(!url)return;setPlayerError("");setPlayerStatus("Готовлю серию…");await publish({url,title:title||"TogetherTV",playing:false,position:0});setNotice("Серия установлена. Плеер должен показать «Загружаю серию…». Дождись «Серия загружена ✓», затем запускай.");};
  const playAll=async()=>{const p=pos();await publish({playing:true,position:p});const v=video.current;if(v){v.currentTime=p;try{await v.play()}catch{setNotice("На этом телефоне браузер заблокировал автозапуск. Нажми ▶ на самом плеере один раз.")}}};
  const pauseAll=async()=>{await publish({playing:false,position:pos()});video.current?.pause()};
- const videos=Array.isArray(selected?.videos)?selected.videos:Array.isArray(selected?.response?.videos)?selected.response.videos:Array.isArray(selected?.data?.videos)?selected.data.videos:[];
+ const videos=findVideos(selected);
 
  return <main><header><div><b className="logo">TogetherTV</b><span className="muted"> watch party</span></div><button className="ghost" onClick={()=>setAdmin(!admin)}>{admin?"Закрыть админку":"Админ"}</button></header><div className="room">Комната: <b>{room}</b></div>
  <section className="hero"><div className="player"><video ref={video} controls playsInline/>{!state.url&&<div className="empty"><div className="play">▶</div><h1>Готовы смотреть вместе</h1><p>Сначала выбери серию в админке.</p></div>}</div><div className="playerStatus"><b>{playerStatus}</b>{playerError&&<span className="error">{playerError}</span>}</div><div className="now"><span>Сейчас смотрим</span><strong>{state.title}</strong><i className={state.playing?"live":""}>{state.playing?"● PLAY":"Ⅱ PAUSE"}</i></div></section>
