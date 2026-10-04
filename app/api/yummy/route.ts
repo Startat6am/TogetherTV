@@ -16,7 +16,7 @@ async function fetchText(url:string,options:RequestInit={}){const r=await fetch(
 
 async function inspectAksorSource(url:string,referer:string){
  try{
-  const r=await fetch(url,{headers:{"User-Agent":UA,Referer:referer,Accept:"*/*",Accept-Encoding:"identity",Range:"bytes=0-511"},cache:"no-store"});
+  const r=await fetch(url,{headers:{"User-Agent":UA,Referer:referer,Accept:"*/*","Accept-Encoding":"identity",Range:"bytes=0-511"},cache:"no-store"});
   const type=(r.headers.get("content-type")||"").toLowerCase();
   const buf=Buffer.from(await r.arrayBuffer());
   const head=buf.toString("utf8",0,Math.min(buf.length,512));
