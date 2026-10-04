@@ -81,7 +81,7 @@ async function resolveKodik(raw:string){
  // Kodik deliberately changes the endpoint. Do not guess it: read the exact
  // POST target from the current player script. Modern players fall back to
  // /kor when the script no longer embeds an endpoint.
- const endpointMatch=/type:"POST",url:atob\\("(?<b64str>[^"]+)"\\)/i.exec(script);
+  const endpointMatch=/type:"POST",url:atob\("(?<b64str>[^"]+)"\)/i.exec(script);
  const endpoint=endpointMatch?.groups?.b64str?Buffer.from(endpointMatch.groups.b64str,"base64").toString("utf8").trim():"/kor";
  if(!endpoint.startsWith("/"))throw new Error("Kodik: player вернул некорректный endpoint");
 
@@ -95,7 +95,7 @@ async function resolveKodik(raw:string){
   });
   const txt=(await response.text()).trim();
   if(!response.ok)throw new Error(`Kodik resolver: HTTP ${response.status} (${endpoint})`);
-  try{json=JSON.parse(txt.replace(/^\\uFEFF/,""))}catch{throw new Error(`Kodik resolver: сервер вернул не JSON (${txt.slice(0,120).replace(/\\s+/g," ")})`)}
+   try{json=JSON.parse(txt.replace(/^\uFEFF/,""))}catch{throw new Error(`Kodik resolver: сервер вернул не JSON (${txt.slice(0,120).replace(/\s+/g," ")})`)}
  }else{
   if(!urlParamsRaw)throw new Error("Kodik: для этого endpoint не найдены urlParams");
   const body=new URLSearchParams({
@@ -121,20 +121,20 @@ async function resolveKodik(raw:string){
   });
   const txt=(await response.text()).trim();
   if(!response.ok)throw new Error(`Kodik resolver: HTTP ${response.status} (${endpoint})`);
-  try{json=JSON.parse(txt.replace(/^\\uFEFF/,""))}catch{throw new Error(`Kodik resolver: сервер вернул не JSON (${txt.slice(0,120).replace(/\\s+/g," ")})`)}
+   try{json=JSON.parse(txt.replace(/^\uFEFF/,""))}catch{throw new Error(`Kodik resolver: сервер вернул не JSON (${txt.slice(0,120).replace(/\s+/g," ")})`)}
  }
 
  const out:{quality:string,url:string}[]=[];
  for(const [q,arr] of Object.entries(json?.links||{})){
   const item:any=Array.isArray(arr)?arr.find((x:any)=>x?.src):null;
   const url=decodeKodikSrc(String(item?.src||""));
-  if(/^https?:\\/\\//i.test(url))out.push({quality:q,url});
+   if(url.startsWith("http://")||url.startsWith("https://"))out.push({quality:q,url});
  }
  if(!out.length)throw new Error(`Kodik: endpoint ${endpoint} не вернул видеопоток`);
  console.info("[TogetherTV Kodik resolve]",JSON.stringify({host:u.hostname,endpoint,type,id,hash,qualities:out.map(x=>x.quality)}));
  return out;
 }
-function decodeKodikSrc(src:string){if(!src)return "";if(src.startsWith("//"))return "https:"+src;if(/^https?:\\/\\//i.test(src))return src;try{let x=String(src).split("").map(ch=>{if(!/[a-z]/i.test(ch))return ch;let n=ch.charCodeAt(0)+18;const max=ch<="Z"?90:122;if(n>max)n-=26;return String.fromCharCode(n)}).join("");x+="=".repeat((4-x.length%4)%4);return Buffer.from(x,"base64").toString("utf8")}catch{return ""}}
+ function decodeKodikSrc(src:string){if(!src)return "";if(src.startsWith("//"))return "https:"+src;if(src.startsWith("http://")||src.startsWith("https://"))return src;try{let x=String(src).split("").map(ch=>{if(!/[a-z]/i.test(ch))return ch;let n=ch.charCodeAt(0)+18;const max=ch<="Z"?90:122;if(n>max)n-=26;return String.fromCharCode(n)}).join("");x+="=".repeat((4-x.length%4)%4);const decoded=Buffer.from(x,"base64").toString("utf8");return decoded.startsWith("//")?"https:"+decoded:decoded}catch{return ""}}
 async function resolvePlayer(raw:string){const iframe=normalizeUrl(raw);let host="";try{host=new URL(iframe).hostname.toLowerCase()}catch{throw new Error("Плеер вернул некорректную ссылку")}if(host.includes("aksor"))return resolveAksor(iframe);if(host.includes("kodik"))return resolveKodik(iframe);throw new Error(`Неподдерживаемый плеер: ${host}`)}
 
 export async function POST(req:NextRequest){
