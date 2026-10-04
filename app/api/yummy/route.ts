@@ -73,7 +73,7 @@ async function resolveKodik(raw:string){
   try{up=JSON.parse(urlParamsRaw)}catch{throw new Error("Kodik: повреждены urlParams")}
  }
 
- const playerSrc=pick(/src=["']((?:(?:https?:)?\\/\\/[^"']+)?\\/assets\\/js\\/app\\.player_single\\.[^"']+\\.js)["']/i);
+ const playerSrc=pick(/src=["']((?:(?:https?:)?\/\/[^"']+)?\/assets\/js\/app\.player_single[^"']+\.js)["']/i);
  if(!playerSrc)throw new Error("Kodik: не найден player_single");
  const scriptUrl=absoluteUrl(playerSrc,u.origin);
  const script=await fetchText(scriptUrl,{headers:{Referer:full}});
