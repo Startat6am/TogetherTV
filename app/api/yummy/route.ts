@@ -3,7 +3,7 @@ import { Redis } from "@upstash/redis";
 
 const API="https://api.yani.tv";
 const redis=process.env.UPSTASH_REDIS_REST_URL&&process.env.UPSTASH_REDIS_REST_TOKEN?Redis.fromEnv():null;
-const STREAM_TTL=60*60*3;
+const STREAM_TTL=60*60*24;
 
 async function registerStream(url:string,referer:string){const token=crypto.randomUUID().replace(/-/g,"");if(redis)await redis.set(`togethertv:stream:${token}`,JSON.stringify({url,referer}),{ex:STREAM_TTL});return redis?`/api/stream?token=${token}`:url}
 async function registerSources(sources:{quality:string,url:string,kind?:string}[],referer:string){const out=[] as any[];for(const source of sources){const proxy=await registerStream(source.url,referer);const kind=source.kind||(/\.m3u8(?:$|\?)/i.test(source.url)?"m3u8":/\.mp4(?:$|\?)/i.test(source.url)?"mp4":"media");out.push({quality:source.quality,url:proxy+(proxy.startsWith("/api/stream?")?"&type="+kind:""),kind})}return out}
