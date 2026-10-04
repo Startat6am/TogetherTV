@@ -16,7 +16,7 @@ async function resolveAksor(rawIframeUrl:string){
  if(!url){
   const directMarkers=["https://","http://"];
   for(const marker of directMarkers){const p=html.indexOf(marker);if(p>=0){const tail=html.slice(p);const end=tail.search(/[\"'\\s<>]/);const candidate=(end>0?tail.slice(0,end):tail).trim();if(/\\.(m3u8|mp4)(\\?|$)/i.test(candidate)){url=candidate;break}}}
- } for(const pattern of patterns){const m=html.match(pattern);if(m?.[1]){url=m[1];break}}
+ }
  if(!url)throw new Error("Aksor: ссылка видео не найдена");
  url=url.replaceAll("\\u0026","&").replaceAll("\\u002F","/");
  if(!url.startsWith("http://")&&!url.startsWith("https://"))throw new Error("Aksor: найден некорректный URL");
