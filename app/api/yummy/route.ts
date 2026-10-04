@@ -12,8 +12,8 @@ async function resolveAksor(rawIframeUrl:string){
  const html=await response.text();
  if(!response.ok)throw new Error(`Aksor: HTTP ${response.status}`);
  const patterns=[
-  /var\\s+videoUrl\\s*=\\s*["']([^"']+)["']/i,
-  /videoUrl\\s*[:=]\\s*["']([^"']+)["']/i,
+  /var[ \\t]+videoUrl[ \\t]*=[ \\t]*["']([^"']+)["']/i,
+  /videoUrl[ \\t]*[:=][ \\t]*["']([^"']+)["']/i,
   /["'](https?:\\/\\/[^"']+\\.(?:m3u8|mp4)(?:[^"']*)?)["']/i
  ];
  let url="";
