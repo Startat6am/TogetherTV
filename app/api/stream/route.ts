@@ -64,7 +64,32 @@ export async function GET(req:NextRequest){
     };
     if(entry.referer)headers.Referer=entry.referer;
     if(range)headers.Range=range;
-    upstream=await fetch(entry.url,{headers,cache:"no-store"});
+    upstream=await fetch(entry.url,{headers,cache:"no-store",redirect:"follow"});
+
+    // Some Aksor CDN URLs answer a browser Range request with a tiny 206
+    // even though the URL is supposed to be a full episode. Retry once
+    // without Range because servers may legally return the complete resource.
+    if(range&&upstream.status===206){
+      const cr=upstream.headers.get("content-range")||"";
+      const match=/^bytes\s+\d+-\d+\/(\d+)$/i.exec(cr);
+      const total=match?Number(match[1]):0;
+      const length=Number(upstream.headers.get("content-length")||0);
+      if((total>0&&total<1024*1024)||(length>0&&length<1024*1024)){
+        console.warn("[TogetherTV stream] Suspiciously tiny ranged response; retrying without Range",JSON.stringify({
+          contentRange:cr||null,contentLength:length||null,urlHost:new URL(entry.url).hostname,
+        }));
+        const retryHeaders={...headers};
+        delete retryHeaders.Range;
+        const retry=await fetch(entry.url,{headers:retryHeaders,cache:"no-store",redirect:"follow"});
+        if(retry.ok){
+          upstream=retry;
+          console.info("[TogetherTV stream] Range fallback succeeded",JSON.stringify({
+            status:retry.status,contentType:retry.headers.get("content-type")||null,
+            contentLength:retry.headers.get("content-length")||null,
+          }));
+        }
+      }
+    }
   }catch(e){
     console.error("[TogetherTV stream] Upstream fetch failed",e instanceof Error?e.message:"unknown");
     return new NextResponse("Upstream unavailable",{status:502});
