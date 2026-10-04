@@ -57,7 +57,7 @@ export async function GET(req:NextRequest){
     upstream=await fetch(entry.url,{headers,cache:"no-store"});
   }catch{return new NextResponse("Upstream unavailable",{status:502})}
   if(!upstream.ok&&upstream.status!==206)return new NextResponse(`Upstream HTTP ${upstream.status}`,{status:upstream.status});
-  const type=upstream.headers.get("content-type")||"";
+  const type=upstream.headers.get("content-type")||"";const forced=req.nextUrl.searchParams.get("type")||"";
   const isManifest=/mpegurl|\.m3u8/i.test(type)||/\.m3u8(?:$|\?)/i.test(entry.url);
   if(isManifest){
     const text=await upstream.text();
