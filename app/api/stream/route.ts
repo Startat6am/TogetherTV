@@ -85,7 +85,7 @@ export async function GET(req:NextRequest){
       }));
       for(const referer of referers){
         if(referer===originalReferer)continue;
-        const retryHeaders={...headers,Referer:referer};
+        const retryHeaders:Record<string,string>={...headers,Referer:referer};
         if(range)retryHeaders.Range=range;else delete retryHeaders.Range;
         const retry=await fetch(entry.url,{headers:retryHeaders,cache:"no-store",redirect:"follow"});
         if(retry.ok&&!isTiny(retry)){
@@ -99,7 +99,7 @@ export async function GET(req:NextRequest){
         if(retry.ok&&isTiny(retry))await retry.body?.cancel();
       }
       if(isTiny(upstream)&&range){
-        const retryHeaders={...headers};
+        const retryHeaders:Record<string,string>={...headers};
         delete retryHeaders.Range;
         const retry=await fetch(entry.url,{headers:retryHeaders,cache:"no-store",redirect:"follow"});
         if(retry.ok&&!isTiny(retry)){
