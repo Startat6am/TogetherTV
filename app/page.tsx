@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import dashjs from "dashjs";
+import * as dashjs from "dashjs";
 
 type State={url:string;playing:boolean;position:number;updatedAt:number;title:string};
 type Anime=Record<string,any>;
