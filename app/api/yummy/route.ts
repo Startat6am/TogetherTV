@@ -81,8 +81,8 @@ async function resolveKodik(raw:string){
  // Kodik deliberately changes the endpoint. Do not guess it: read the exact
  // POST target from the current player script. Modern players fall back to
  // /kor when the script no longer embeds an endpoint.
-  const endpointMatch=/type:"POST",url:atob\("(?<b64str>[^"]+)"\)/i.exec(script);
- const endpoint=endpointMatch?.groups?.b64str?Buffer.from(endpointMatch.groups.b64str,"base64").toString("utf8").trim():"/kor";
+  const endpointMatch=/type:"POST",url:atob\("([^"]+)"\)/i.exec(script);
+  const endpoint=endpointMatch?.[1]?Buffer.from(endpointMatch[1],"base64").toString("utf8").trim():"/kor";
  if(!endpoint.startsWith("/"))throw new Error("Kodik: player вернул некорректный endpoint");
 
  let json:any;
