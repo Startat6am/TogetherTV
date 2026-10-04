@@ -50,9 +50,9 @@ async function resolveAksor(raw:string){
  const q=payload?.qualities||{},out:{quality:string,url:string}[]=[];
  for(const [quality,key] of [["360p","q360"],["480p","q480"],["720p","q720"],["1080p","q1080"],["2K","q2k"],["4K","q4k"]]){const url=decodeHtmlUrl(String(q[key]||"").trim()).replace(/ /g,"%20");if(url&&url.toLowerCase()!=="null"&&/^https?:\/\//i.test(url))out.push({quality,url})}
  if(!out.length)throw new Error("Aksor: API не вернул ссылок видео");
- const checked:{quality:string,url:string,kind:string}[]=[];
- for(const source of out){const kind=await inspectAksorSource(source.url,full);if(kind==="m3u8"||kind==="mp4")checked.push({...source,kind});}
- if(!checked.length){const details=out.map(s=>{const result=checked.length?"":"";return `${s.quality}: ${"не распознан"}`});throw new Error("Aksor: не удалось проверить видеопотоки. "+details.join("; "));}
+ const checked:{quality:string,url:string,kind:string}[]=[],diagnostics:string[]=[];
+ for(const source of out){const kind=await inspectAksorSource(source.url,full);if(kind==="m3u8"||kind==="mp4")checked.push({...source,kind});else diagnostics.push(`${source.quality}: ${kind}`);}
+ if(!checked.length)throw new Error("Aksor: потоки недоступны или не распознаны. "+diagnostics.join("; "));
  return checked
 }
 
