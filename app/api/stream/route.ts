@@ -66,24 +66,45 @@ export async function GET(req:NextRequest){
     if(range)headers.Range=range;
     upstream=await fetch(entry.url,{headers,cache:"no-store",redirect:"follow"});
 
-    // Some Aksor CDN URLs answer a browser Range request with a tiny 206
-    // even though the URL is supposed to be a full episode. Retry once
-    // without Range because servers may legally return the complete resource.
-    if(range&&upstream.status===206){
-      const cr=upstream.headers.get("content-range")||"";
-      const match=/^bytes\s+\d+-\d+\/(\d+)$/i.exec(cr);
+    // Aksor CDN may return a tiny 206/200 challenge unless the publisher Referer is used.
+    const isTiny=(response:Response)=>{
+      const cr=response.headers.get("content-range")||"";
+      const match=/^bytes\\s+\\d+-\\d+\\/(\\d+)$/i.exec(cr);
       const total=match?Number(match[1]):0;
-      const length=Number(upstream.headers.get("content-length")||0);
-      if((total>0&&total<1024*1024)||(length>0&&length<1024*1024)){
-        console.warn("[TogetherTV stream] Suspiciously tiny ranged response; retrying without Range",JSON.stringify({
-          contentRange:cr||null,contentLength:length||null,urlHost:new URL(entry.url).hostname,
-        }));
+      const length=Number(response.headers.get("content-length")||0);
+      return (total>0&&total<1024*1024)||(length>0&&length<1024*1024);
+    };
+    if(isTiny(upstream)){
+      const originalReferer=entry.referer||"";
+      const referers=[originalReferer,"https://old.yummyani.me/","https://yani.tv/","https://player.aksor.tv/"]
+        .filter((value,index,self)=>Boolean(value)&&self.indexOf(value)===index);
+      console.warn("[TogetherTV stream] Tiny CDN response; trying publisher Referer fallbacks",JSON.stringify({
+        contentRange:upstream.headers.get("content-range")||null,
+        contentLength:upstream.headers.get("content-length")||null,
+        urlHost:new URL(entry.url).hostname,
+      }));
+      for(const referer of referers){
+        if(referer===originalReferer)continue;
+        const retryHeaders={...headers,Referer:referer};
+        if(range)retryHeaders.Range=range;else delete retryHeaders.Range;
+        const retry=await fetch(entry.url,{headers:retryHeaders,cache:"no-store",redirect:"follow"});
+        if(retry.ok&&!isTiny(retry)){
+          upstream=retry;
+          console.info("[TogetherTV stream] Publisher Referer fallback succeeded",JSON.stringify({
+            referer,status:retry.status,contentType:retry.headers.get("content-type")||null,
+            contentLength:retry.headers.get("content-length")||null,contentRange:retry.headers.get("content-range")||null,
+          }));
+          break;
+        }
+        if(retry.ok&&isTiny(retry))await retry.body?.cancel();
+      }
+      if(isTiny(upstream)&&range){
         const retryHeaders={...headers};
         delete retryHeaders.Range;
         const retry=await fetch(entry.url,{headers:retryHeaders,cache:"no-store",redirect:"follow"});
-        if(retry.ok){
+        if(retry.ok&&!isTiny(retry)){
           upstream=retry;
-          console.info("[TogetherTV stream] Range fallback succeeded",JSON.stringify({
+          console.info("[TogetherTV stream] Range-less fallback succeeded",JSON.stringify({
             status:retry.status,contentType:retry.headers.get("content-type")||null,
             contentLength:retry.headers.get("content-length")||null,
           }));
