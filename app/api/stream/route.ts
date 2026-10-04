@@ -9,10 +9,14 @@ function normalizeUrl(v:string,base:string){
 }
 
 async function getEntry(token:string){
-  if(!redis)return null;
-  const raw=await redis.get<string>(`togethertv:stream:${token}`);
-  if(!raw)return null;
-  try{return JSON.parse(raw) as {url:string;referer:string}}catch{return null}
+  if(!redis){console.error("[TogetherTV stream] Redis is not configured");return null;}
+  let raw:unknown;
+  try{raw=await redis.get<unknown>(`togethertv:stream:${token}`)}catch(e){console.error("[TogetherTV stream] Redis read failed",e instanceof Error?e.message:"unknown");return null;}
+  if(!raw){console.warn("[TogetherTV stream] Token not found");return null;}
+  if(typeof raw==="object"&&raw!==null&&"url" in raw&&typeof (raw as any).url==="string")return raw as {url:string;referer:string};
+  if(typeof raw==="string"){try{const parsed=JSON.parse(raw);if(parsed&&typeof parsed.url==="string")return parsed as {url:string;referer:string}}catch{}}
+  console.warn("[TogetherTV stream] Invalid token record",typeof raw);
+  return null;
 }
 
 async function saveChild(url:string,referer:string){
@@ -48,14 +52,14 @@ export async function GET(req:NextRequest){
   const token=req.nextUrl.searchParams.get("token")||"";
   if(!token)return new NextResponse("Missing token",{status:400});
   const entry=await getEntry(token);
-  if(!entry?.url)return new NextResponse("Stream expired",{status:404});
+  if(!entry?.url){console.warn("[TogetherTV stream] Stream token unavailable",JSON.stringify({tokenPresent:Boolean(token),redisConfigured:Boolean(redis)}));return new NextResponse("Stream expired",{status:404});}
   let upstream:Response;
   try{
     const headers:Record<string,string>={"User-Agent":UA,"Accept":"*/*"};
     if(entry.referer)headers.Referer=entry.referer;
     const range=req.headers.get("range");if(range)headers.Range=range;
     upstream=await fetch(entry.url,{headers,cache:"no-store"});
-  }catch{return new NextResponse("Upstream unavailable",{status:502})}
+  }catch(e){console.error("[TogetherTV stream] Upstream fetch failed",e instanceof Error?e.message:"unknown");return new NextResponse("Upstream unavailable",{status:502})}
   if(!upstream.ok&&upstream.status!==206)return new NextResponse(`Upstream HTTP ${upstream.status}`,{status:upstream.status});
   const type=upstream.headers.get("content-type")||"";const forced=req.nextUrl.searchParams.get("type")||"";
   const isManifest=/mpegurl|\.m3u8/i.test(type)||/\.m3u8(?:$|\?)/i.test(entry.url);
