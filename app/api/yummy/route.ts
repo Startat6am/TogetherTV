@@ -6,16 +6,22 @@ const clean=(v:unknown)=>typeof v==="string"?v.trim():"";
 function rot13(s:string){return s.replace(/[a-zA-Z]/g,c=>String.fromCharCode(c.charCodeAt(0)+(c.toLowerCase()<"n"?13:-13)))}
 function decodeSrc(src:string){try{return Buffer.from(rot13(src),"base64").toString("latin1")}catch{return src}}
 
-async function resolveKodik(iframeUrl:string){
- const frame=await fetch(iframeUrl,{headers:{"User-Agent":UA,"Accept":"text/html,*/*"}});
+async function resolveKodik(rawIframeUrl:string){
+ const iframeUrl=rawIframeUrl.startsWith("//")?"https:"+rawIframeUrl:rawIframeUrl;
+ let parsed:URL; try{parsed=new URL(iframeUrl)}catch{throw new Error("Kodik вернул некорректный URL источника")}
+ const frame=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Accept":"text/html,*/*"}});
  const html=await frame.text(); const params:Record<string,string>={};
  for(const m of html.matchAll(/([a-zA-Z0-9_]+?)\s?=\s?["']([^'"]+?)["']/g))params[m[1]]=m[2];
  const hash=html.match(/videoInfo\.hash\s*=\s*["'](.+?)["']/); if(hash)params.hash=hash[1];
  if(!Object.keys(params).length)throw new Error("Не удалось получить параметры Kodik");
  params.bad_user="false"; params.d="yummyani.me";
- const origin=new URL(iframeUrl).origin;
+ const origin=parsed.origin;
  const post=await fetch(origin+"/ftor",{method:"POST",headers:{"User-Agent":UA,"Referer":iframeUrl,"Origin":origin,"X-Requested-With":"XMLHttpRequest","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","Accept":"application/json,text/plain,*/*"},body:new URLSearchParams(params)});
- const json:any=await post.json(); const out:{quality:string,url:string}[]=[];
+ const postText=await post.text();
+ if(!post.ok)throw new Error(`Kodik /ftor: HTTP ${post.status}`);
+ if(/^\s*</.test(postText))throw new Error("Kodik /ftor вернул HTML вместо JSON — источник этой серии сейчас недоступен для автоматического извлечения");
+ let json:any;try{json=JSON.parse(postText)}catch{throw new Error("Kodik /ftor вернул повреждённый JSON")}
+ const out:{quality:string,url:string}[]=[];
  for(const [quality,arr] of Object.entries(json?.links||{})){const item:any=Array.isArray(arr)?arr[0]:null;if(item?.src)out.push({quality,url:decodeSrc(String(item.src))})}
  return out.filter(x=>/^https?:\/\//.test(x.url));
 }
