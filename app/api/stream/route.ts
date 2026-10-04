@@ -125,11 +125,20 @@ export async function GET(req:NextRequest){
   const forced=req.nextUrl.searchParams.get("type")||"";
   const isManifest=/mpegurl|\.m3u8/i.test(type)||/\.m3u8(?:$|\?)/i.test(entry.url);
 
-  if(isManifest){
-    const text=await upstream.text();
-    const rewritten=await rewriteManifest(text,entry.url,entry.referer);
-    return new NextResponse(rewritten,{status:200,headers:{
-      "Content-Type":"application/vnd.apple.mpegurl",
+  if(isManifest||isDash){
+    let text=await upstream.text();
+    let manifestType="application/vnd.apple.mpegurl";
+    if(isDash){
+      manifestType="application/dash+xml";
+      try{
+        const base=new URL(entry.url);base.search="";base.hash="";base.pathname=base.pathname.slice(0,base.pathname.lastIndexOf("/")+1);
+        const baseUrl=base.toString();
+        text=text.replace(/<BaseURL(\\s[^>]*)?>([\\s\\S]*?)<\\/BaseURL>/gi,(_m,attrs,raw)=>`<BaseURL${attrs||""}>${normalizeUrl(raw.trim(),baseUrl)}</BaseURL>`);
+        if(!/<BaseURL(?:\\s[^>]*)?>/i.test(text))text=text.replace(/(<MPD\\b[^>]*>)/i,`$1<BaseURL>${baseUrl}</BaseURL>`);
+      }catch{}
+    }else text=await rewriteManifest(text,entry.url,entry.referer);
+    return new NextResponse(text,{status:200,headers:{
+      "Content-Type":manifestType,
       "Cache-Control":"no-store",
       "Access-Control-Allow-Origin":"*",
       "Access-Control-Expose-Headers":"Content-Length, Content-Range, Accept-Ranges, Content-Type",
