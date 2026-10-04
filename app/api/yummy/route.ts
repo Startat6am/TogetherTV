@@ -13,7 +13,7 @@ async function registerStream(url:string,referer:string){
 
 async function registerSources(sources:{quality:string,url:string}[],referer:string){
  const out=[] as {quality:string,url:string}[];
- for(const source of sources)const proxy=await registerStream(source.url,referer);const kind=/\.m3u8(?:$|\?)/i.test(source.url)?"m3u8":/\.mp4(?:$|\?)/i.test(source.url)?"mp4":"media";out.push({quality:source.quality,url:proxy+(proxy.startsWith("/api/stream?")?"&type="+kind:""),kind} as any);
+ for(const source of sources){const proxy=await registerStream(source.url,referer);const kind=/\.m3u8(?:$|\?)/i.test(source.url)?"m3u8":/\.mp4(?:$|\?)/i.test(source.url)?"mp4":"media";out.push({quality:source.quality,url:proxy+(proxy.startsWith("/api/stream?")?"&type="+kind:""),kind} as any)}
  return out;
 }
 const UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/149.0.0.0 Safari/537.36";
