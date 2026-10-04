@@ -16,21 +16,20 @@ async function fetchText(url:string,options:RequestInit={}){const r=await fetch(
 
 async function inspectAksorSource(url:string,referer:string){
  try{
-  const r=await fetch(url,{headers:{"User-Agent":UA,Referer:referer,Accept:"*/*","Accept-Encoding":"identity",Range:"bytes=0-511"},cache:"no-store"});
+  const r=await fetch(url,{headers:{"User-Agent":UA,Referer:referer,Accept:"*/*","Accept-Encoding":"identity",Range:"bytes=0-1048575"},redirect:"follow",cache:"no-store"});
   const type=(r.headers.get("content-type")||"").toLowerCase();
   const buf=Buffer.from(await r.arrayBuffer());
-  const head=buf.toString("utf8",0,Math.min(buf.length,512));
+  const head=buf.toString("utf8",0,Math.min(buf.length,2048));
   const ftyp=buf.subarray(4,8).toString("ascii");
   const contentLength=r.headers.get("content-length")||"";
   const contentRange=r.headers.get("content-range")||"";
   const signature=buf.subarray(0,16).toString("hex");
   const looksManifest=head.trimStart().startsWith("#EXTM3U")||type.includes("mpegurl");
   if(looksManifest)return "m3u8";
-  if(type.includes("video/mp4")||type.includes("video/")||ftyp==="ftyp")return "mp4";
-  if(type.includes("application/octet-stream")&&(ftyp==="ftyp"||buf.subarray(0,4).toString("ascii")==="RIFF"))return "mp4";
+  const isIsoBmff=ftyp==="ftyp" && buf.length>=12; const hasMoov=buf.includes(Buffer.from("moov")); const hasMdat=buf.includes(Buffer.from("mdat")); if(isIsoBmff && (hasMoov||hasMdat) && (buf.length>=8192 || contentRange.includes("/")))return "mp4";
+  if(type.includes("application/octet-stream")&&isIsoBmff&&buf.length>=8192)return "mp4";
   const looksText=/^(<!doctype\s+html|<html|\s*[{[]|#EXTM3U|Access Denied|Forbidden)/i.test(head);
-  if(r.status===206&&!looksText&&buf.length>0)return `mp4`;
-  if(type.includes("video/")&&!type.includes("mpegurl"))return "mp4";
+  if(r.status===206&&!looksText&&isIsoBmff&&buf.length>=8192)return `mp4`;
   return `bad:${r.status}:${type||"unknown"}:len=${buf.length}:cl=${contentLength||"none"}:cr=${contentRange||"none"}:sig=${signature}:head=${head.replace(/\s+/g," ").slice(0,100)}`;
  }catch(e){return `error:${e instanceof Error?e.message:"unknown"}`}
 }
