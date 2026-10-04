@@ -11,13 +11,12 @@ async function resolveAksor(rawIframeUrl:string){
  const response=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Referer":"https://animego.org","Accept":"text/html,*/*","Accept-Language":"ru-RU,ru;q=0.9"},cache:"no-store"});
  const html=await response.text();
  if(!response.ok)throw new Error(`Aksor: HTTP ${response.status}`);
- const patterns=[
-  /var[ \\t]+videoUrl[ \\t]*=[ \\t]*["']([^"']+)["']/i,
-  /videoUrl[ \\t]*[:=][ \\t]*["']([^"']+)["']/i,
-  /["'](https?:\\/\\/[^"']+\\.(?:m3u8|mp4)(?:[^"']*)?)["']/i
- ];
- let url="";
- for(const pattern of patterns){const m=html.match(pattern);if(m?.[1]){url=m[1];break}}
+ const extractQuoted=(source:string,key:string)=>{const p=source.indexOf(key);if(p<0)return "";const rest=source.slice(p+key.length);const eq=rest.indexOf("=");if(eq<0)return "";const tail=rest.slice(eq+1).trim();const quote=tail[0];if(quote!==String.fromCharCode(34)&&quote!==String.fromCharCode(39))return "";const end=tail.indexOf(quote,1);return end>0?tail.slice(1,end):""};
+ let url=extractQuoted(html,"videoUrl");
+ if(!url){
+  const directMarkers=["https://","http://"];
+  for(const marker of directMarkers){const p=html.indexOf(marker);if(p>=0){const tail=html.slice(p);const end=tail.search(/[\"'\\s<>]/);const candidate=(end>0?tail.slice(0,end):tail).trim();if(/\\.(m3u8|mp4)(\\?|$)/i.test(candidate)){url=candidate;break}}}
+ } for(const pattern of patterns){const m=html.match(pattern);if(m?.[1]){url=m[1];break}}
  if(!url)throw new Error("Aksor: ссылка видео не найдена");
  url=url.replaceAll("\\u0026","&").replaceAll("\\u002F","/");
  if(!url.startsWith("http://")&&!url.startsWith("https://"))throw new Error("Aksor: найден некорректный URL");
