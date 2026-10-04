@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Redis } from "@upstash/redis";
 
 const API="https://api.yani.tv";
+const redis=process.env.UPSTASH_REDIS_REST_URL&&process.env.UPSTASH_REDIS_REST_TOKEN?Redis.fromEnv():null;
+const STREAM_TTL=60*60*3;
+
+async function registerStream(url:string,referer:string){
+ const token=crypto.randomUUID().replace(/-/g,"");
+ if(redis)await redis.set(`togethertv:stream:${token}`,JSON.stringify({url,referer}),{ex:STREAM_TTL});
+ return redis?`/api/stream?token=${token}`:url;
+}
+
+async function registerSources(sources:{quality:string,url:string}[],referer:string){
+ const out=[] as {quality:string,url:string}[];
+ for(const source of sources)out.push({quality:source.quality,url:await registerStream(source.url,referer)});
+ return out;
+}
 const UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/149.0.0.0 Safari/537.36";
 const clean=(v:unknown)=>typeof v==="string"?v.trim():"";
 
@@ -42,7 +57,7 @@ async function resolvePlayer(raw:string){const iframe=normalizeUrl(raw);let host
 
 export async function POST(req:NextRequest){
  try{const body=await req.json(),token=clean(body?.token),privateToken=clean(body?.privateToken),action=body?.action;if(!token)return NextResponse.json({error:"Нужен Public key (X-Application)"},{status:400});
- if(action==="resolve"){const iframe=clean(body?.iframe);if(!iframe)return NextResponse.json({error:"Не указан iframe"},{status:400});try{return NextResponse.json({sources:await resolvePlayer(iframe)},{headers:{"Cache-Control":"no-store"}})}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Не удалось получить видео"},{status:502})}}
+ if(action==="resolve"){const iframe=clean(body?.iframe);if(!iframe)return NextResponse.json({error:"Не указан iframe"},{status:400});try{const sources=await resolvePlayer(iframe);return NextResponse.json({sources:await registerSources(sources,iframe)},{headers:{"Cache-Control":"no-store"}})}catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Не удалось получить видео"},{status:502})}}
  let path="",params=new URLSearchParams();if(action==="search"){const q=clean(body?.query);if(!q)return NextResponse.json({error:"Введите название"},{status:400});path="/search";params.set("q",q);params.set("limit","10");params.set("offset","0")}else if(action==="anime"){const id=String(body?.id??"").trim();if(!id)return NextResponse.json({error:"Не указан anime id"},{status:400});path="/anime/"+encodeURIComponent(id);params.set("need_videos","1")}else return NextResponse.json({error:"Неизвестное действие"},{status:400});
  const headers:Record<string,string>={"X-Application":token,Accept:"application/json","Accept-Language":"ru"};if(privateToken)headers.Authorization="Bearer "+privateToken;const r=await fetch(API+path+"?"+params.toString(),{headers,cache:"no-store"}),txt=await r.text();let data:unknown;try{data=JSON.parse(txt)}catch{data={raw:txt}}if(!r.ok)return NextResponse.json({error:`YummyAnime API: HTTP ${r.status}`,data},{status:r.status});return NextResponse.json({data},{headers:{"Cache-Control":"no-store"}})
  }catch{return NextResponse.json({error:"Не удалось обратиться к YummyAnime API"},{status:500})}
