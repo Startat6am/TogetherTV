@@ -6,6 +6,35 @@ const clean=(v:unknown)=>typeof v==="string"?v.trim():"";
 function rot13(s:string){return s.replace(/[a-zA-Z]/g,c=>String.fromCharCode(c.charCodeAt(0)+(c.toLowerCase()<"n"?13:-13)))}
 function decodeSrc(src:string){try{return Buffer.from(rot13(src),"base64").toString("latin1")}catch{return src}}
 
+async function resolveAksor(rawIframeUrl:string){
+ const iframeUrl=rawIframeUrl.startsWith("//")?"https:"+rawIframeUrl:rawIframeUrl;
+ let parsed:URL;
+ try{parsed=new URL(iframeUrl)}catch{throw new Error("Aksor вернул некорректный URL")}
+
+ const response=await fetch(parsed.toString(),{
+   headers:{
+     "User-Agent":UA,
+     "Referer":"https://animego.org",
+     "Accept":"text/html,*/*",
+     "Accept-Language":"ru-RU,ru;q=0.9"
+   },
+   cache:"no-store"
+ });
+ const html=await response.text();
+ if(!response.ok)throw new Error(`Aksor: HTTP ${response.status}`);
+
+ // Aksor embeds the actual media URL in: var videoUrl = "..."
+ const match=html.match(/var\\s+videoUrl\\s*=\\s*["'](.+?)["']/i);
+ if(!match?.[1])throw new Error("Aksor: videoUrl не найден на странице плеера");
+
+ const url=match[1].replace(/\\\\/g,"\\").replace(/\\u0026/g,"&");
+ if(!/^https?:\\/\\//i.test(url))throw new Error("Aksor: найден некорректный videoUrl");
+
+ const fileMatch=url.match(/\\/(\\d+)\\.(?:mp4|m3u8)(?:$|[?#])/i);
+ const quality=fileMatch?.[1]||"auto";
+ return [{quality,url}];
+}
+
 async function resolveKodik(rawIframeUrl:string){
  const iframeUrl=rawIframeUrl.startsWith("//")?"https:"+rawIframeUrl:rawIframeUrl;
  let parsed:URL;
@@ -14,34 +43,19 @@ async function resolveKodik(rawIframeUrl:string){
  const parts=parsed.pathname.split("/").filter(Boolean);
  if(parts.length<4)throw new Error("Kodik: не удалось разобрать ссылку серии");
  const type=parts[0], id=parts[1], hash=parts[2];
- if(!/^\d+$/.test(id)||!/^[0-9a-z]+$/i.test(hash)){
-   throw new Error("Kodik: некорректные id/hash серии");
- }
+ if(!/^\\d+$/.test(id)||!/^[0-9a-z]+$/i.test(hash))throw new Error("Kodik: некорректные id/hash серии");
 
- // В актуальном Kodik quality НЕ передаётся в video-info endpoint.
- // Endpoint по умолчанию — /kor; /ftor больше не используем как fallback.
  const params=new URLSearchParams({type,id,hash});
- const page=await fetch(parsed.toString(),{
-   headers:{
-     "User-Agent":UA,
-     "Accept":"text/html,*/*",
-     "Referer":"https://yummyani.me/"
-   },
-   cache:"no-store"
- });
+ const page=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Accept":"text/html,*/*","Referer":"https://yummyani.me/"},cache:"no-store"});
  const html=await page.text();
 
  let endpoint="/kor";
- const playerMatch=html.match(/<script[^>]+src=["']([^"']*player_single[^"']*\.js)["']/i);
+ const playerMatch=html.match(/<script[^>]+src=["']([^"']*player_single[^"']*\\.js)["']/i);
  if(playerMatch?.[1]){
    try{
      const playerUrl=new URL(playerMatch[1],parsed.origin);
-     const jsResponse=await fetch(playerUrl.toString(),{
-       headers:{"User-Agent":UA,"Referer":iframeUrl},
-       cache:"no-store"
-     });
-     const js=await jsResponse.text();
-     const b64=js.match(/type:"POST",url:atob\("([^"]+)"\)/i)?.[1];
+     const js=await (await fetch(playerUrl.toString(),{headers:{"User-Agent":UA,"Referer":iframeUrl},cache:"no-store"})).text();
+     const b64=js.match(/type:"POST",url:atob\\("([^"]+)"\\)/i)?.[1];
      if(b64){
        const discovered=Buffer.from(b64,"base64").toString("utf8").trim();
        if(discovered)endpoint=discovered;
@@ -52,45 +66,38 @@ async function resolveKodik(rawIframeUrl:string){
  const endpointUrl=new URL(endpoint,parsed.origin);
  const response=await fetch(endpointUrl.toString()+"?"+params.toString(),{
    method:"GET",
-   headers:{
-     "User-Agent":UA,
-     "Referer":iframeUrl,
-     "Accept":"application/json,text/plain,*/*"
-   },
+   headers:{"User-Agent":UA,"Referer":iframeUrl,"Accept":"application/json,text/plain,*/*"},
    cache:"no-store"
  });
  const body=await response.text();
- if(!response.ok){
-   throw new Error(`Kodik resolver: HTTP ${response.status} (${endpointUrl.pathname})`);
- }
- if(/^\s*</.test(body)){
-   throw new Error(`Kodik resolver вернул HTML вместо JSON (${endpointUrl.pathname})`);
- }
-
- let json:any;
- try{json=JSON.parse(body)}
- catch{throw new Error(`Kodik resolver вернул некорректный JSON (${endpointUrl.pathname})`)}
+ if(!response.ok)throw new Error(`Kodik resolver: HTTP ${response.status} (${endpointUrl.pathname})`);
+ if(/^\\s*</.test(body))throw new Error(`Kodik resolver вернул HTML вместо JSON (${endpointUrl.pathname})`);
+ let json:any;try{json=JSON.parse(body)}catch{throw new Error(`Kodik resolver вернул некорректный JSON (${endpointUrl.pathname})`)}
 
  const out:{quality:string,url:string}[]=[];
  for(const [q,arr] of Object.entries(json?.links||{})){
    const item:any=Array.isArray(arr)?arr[0]:null;
    if(!item?.src)continue;
-
    const decryptedBase64=String(item.src).replace(/[a-zA-Z]/g,(ch)=>{
-     let n=ch.charCodeAt(0)+18;
-     const max=ch<="Z"?90:122;
-     if(n>max)n-=26;
-     return String.fromCharCode(n);
+     let n=ch.charCodeAt(0)+18; const max=ch<="Z"?90:122;
+     if(n>max)n-=26; return String.fromCharCode(n);
    });
-
    try{
      const url=Buffer.from(decryptedBase64,"base64").toString("utf8");
-     if(/^https?:\/\//i.test(url))out.push({quality:q,url});
+     if(/^https?:\\/\\//i.test(url))out.push({quality:q,url});
    }catch{}
  }
-
  if(!out.length)throw new Error("Kodik: resolver не вернул видеопоток");
  return out;
+}
+
+async function resolvePlayer(rawIframeUrl:string){
+ const iframe=rawIframeUrl.startsWith("//")?"https:"+rawIframeUrl:rawIframeUrl;
+ let host="";
+ try{host=new URL(iframe).hostname.toLowerCase()}catch{throw new Error("Плеер вернул некорректную ссылку")}
+ if(host==="aksor.yani.tv"||host.endsWith(".aksor.yani.tv"))return resolveAksor(iframe);
+ if(host.includes("kodik"))return resolveKodik(iframe);
+ throw new Error(`Неподдерживаемый плеер: ${host}`);
 }
 
 export async function POST(req:NextRequest){
@@ -99,7 +106,7 @@ export async function POST(req:NextRequest){
   if(!token)return NextResponse.json({error:"Нужен Public key (X-Application)"},{status:400});
   if(action==="resolve"){
    const iframe=clean(body?.iframe); if(!iframe)return NextResponse.json({error:"Не указан iframe"},{status:400});
-   try{return NextResponse.json({sources:await resolveKodik(iframe)},{headers:{"Cache-Control":"no-store"}})}
+   try{return NextResponse.json({sources:await resolvePlayer(iframe)},{headers:{"Cache-Control":"no-store"}})}
    catch(e){return NextResponse.json({error:e instanceof Error?e.message:"Не удалось получить видео"},{status:502})}
   }
   let path=""; const params=new URLSearchParams();
