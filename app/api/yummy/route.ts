@@ -9,21 +9,56 @@ function decodeSrc(src:string){try{return Buffer.from(rot13(src),"base64").toStr
 async function resolveKodik(rawIframeUrl:string){
  const iframeUrl=rawIframeUrl.startsWith("//")?"https:"+rawIframeUrl:rawIframeUrl;
  let parsed:URL; try{parsed=new URL(iframeUrl)}catch{throw new Error("Kodik вернул некорректный URL источника")}
- const frame=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Accept":"text/html,*/*","Referer":"https://yummyani.me/"}});
- const html=await frame.text(); const params:Record<string,string>={};
- for(const m of html.matchAll(/([a-zA-Z0-9_]+?)\s?=\s?["']([^'"]+?)["']/g))params[m[1]]=m[2];
- const hash=html.match(/videoInfo\.hash\s*=\s*["'](.+?)["']/); if(hash)params.hash=hash[1];
- if(!Object.keys(params).length)throw new Error("Не удалось получить параметры Kodik");
- params.bad_user="false"; params.d="yummyani.me";
- const origin=parsed.origin;
- const post=await fetch(origin+"/ftor",{method:"POST",headers:{"User-Agent":UA,"Referer":iframeUrl,"Origin":origin,"X-Requested-With":"XMLHttpRequest","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","Accept":"application/json,text/plain,*/*"},body:new URLSearchParams(params)});
- const postText=await post.text();
- if(!post.ok)throw new Error(`Kodik /ftor: HTTP ${post.status}`);
- if(/^\s*</.test(postText))throw new Error("Kodik /ftor вернул HTML вместо JSON — источник этой серии сейчас недоступен для автоматического извлечения");
- let json:any;try{json=JSON.parse(postText)}catch{throw new Error("Kodik /ftor вернул повреждённый JSON")}
+
+ // Kodik currently exposes the video-info resolver as a GET endpoint.
+ // The iframe URL itself already contains the type/id/hash/quality needed by it.
+ const parts=parsed.pathname.split("/").filter(Boolean);
+ if(parts.length<4)throw new Error("Kodik: не удалось разобрать ссылку серии");
+ const type=parts[0], id=parts[1], hash=parts[2], quality=parts[3].replace(/p$/,"");
+ if(!/^\\d+$/.test(id)||!/^[0-9a-z]+$/i.test(hash))throw new Error("Kodik: некорректные id/hash серии");
+
+ const params=new URLSearchParams({type,id,hash,quality});
+ const page=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Accept":"text/html,*/*","Referer":"https://yummyani.me/"},cache:"no-store"});
+ const html=await page.text();
+
+ // New Kodik players can move this endpoint. Follow the player JS when available.
+ let endpoint="/ftor";
+ const player=html.match(/src=["'](\\/assets\\/js\\/app\\.player_single\\.[a-z0-9]+\\.js)["']/i)?.[1];
+ if(player){
+   try{
+     const js=await (await fetch(new URL(player,parsed.origin),{headers:{"User-Agent":UA,"Referer":iframeUrl},cache:"no-store"})).text();
+     const b64=js.match(/type:\s*"POST",url:atob\\("([^"]+)"\\)/i)?.[1];
+     if(b64)endpoint=Buffer.from(b64,"base64").toString("utf8")||endpoint;
+   }catch{}
+ }
+
+ const endpointUrl=new URL(endpoint,parsed.origin);
+ const response=await fetch(endpointUrl.toString()+"?"+params.toString(),{
+   method:"GET",
+   headers:{"User-Agent":UA,"Referer":iframeUrl,"Accept":"application/json,text/plain,*/*"},
+   cache:"no-store"
+ });
+ const text=await response.text();
+ if(!response.ok)throw new Error(`Kodik resolver: HTTP ${response.status}`);
+ if(/^\\s*</.test(text))throw new Error("Kodik resolver вернул HTML вместо JSON");
+ let json:any; try{json=JSON.parse(text)}catch{throw new Error("Kodik resolver вернул некорректный JSON")}
  const out:{quality:string,url:string}[]=[];
- for(const [quality,arr] of Object.entries(json?.links||{})){const item:any=Array.isArray(arr)?arr[0]:null;if(item?.src)out.push({quality,url:decodeSrc(String(item.src))})}
- return out.filter(x=>/^https?:\/\//.test(x.url));
+ for(const [q,arr] of Object.entries(json?.links||{})){
+   const item:any=Array.isArray(arr)?arr[0]:null;
+   if(item?.src){
+     const decrypted=String(item.src).replace(/[a-zA-Z]/g,(ch)=>{
+       let n=ch.charCodeAt(0)+18;
+       if(n>(ch<="Z"?90:122))n-=26;
+       return String.fromCharCode(n);
+     });
+     try{
+       const url=Buffer.from(decrypted,"base64").toString("utf8");
+       if(/^https?:\\/\\//.test(url))out.push({quality:q,url});
+     }catch{}
+   }
+ }
+ if(!out.length)throw new Error("Kodik: resolver не вернул видеопоток");
+ return out;
 }
 
 export async function POST(req:NextRequest){
