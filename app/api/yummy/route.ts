@@ -86,7 +86,7 @@ async function resolveKodik(raw:string){
  if(!endpoint.startsWith("/"))throw new Error("Kodik: player вернул некорректный endpoint");
 
  let json:any;
- if(endpoint==="/kor" && !urlParamsRaw){
+ if(endpoint==="/kor"){
   const query=new URLSearchParams({type,id,hash});
   if(quality)query.set("quality",quality);
   const response=await fetch(new URL(endpoint+"?"+query.toString(),u.origin),{
