@@ -88,9 +88,9 @@ export default function DiagnosticsPage() {
         bytesRead: String(bytes.length),
         firstBytesAscii: ascii.join(""),
         firstBytesHex: hex || "(пусто)",
-        looksLikeHtml: /<!doctype|<html|access denied|forbidden/i.test(ascii.join("")),
-        looksLikeMp4: bytes.length >= 8 && String.fromCharCode(...bytes.slice(4, 8)) === "ftyp",
-        looksLikeHls: ascii.join("").trimStart().startsWith("#EXTM3U"),
+        looksLikeHtml: String(/<!doctype|<html|access denied|forbidden/i.test(ascii.join(""))),
+        looksLikeMp4: String(bytes.length >= 8 && String.fromCharCode(...bytes.slice(4, 8)) === "ftyp"),
+        looksLikeHls: String(ascii.join("").trimStart().startsWith("#EXTM3U")),
       };
       setProbe(info);
       log("http-probe", `HTTP ${response.status}; ${info.contentType}; ${info.contentRange}`);
