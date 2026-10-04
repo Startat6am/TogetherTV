@@ -11,11 +11,20 @@ async function resolveAksor(rawIframeUrl:string){
  const response=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Referer":"https://animego.org","Accept":"text/html,*/*","Accept-Language":"ru-RU,ru;q=0.9"},cache:"no-store"});
  const html=await response.text();
  if(!response.ok)throw new Error(`Aksor: HTTP ${response.status}`);
- const extractQuoted=(source:string,key:string)=>{const p=source.indexOf(key);if(p<0)return "";const rest=source.slice(p+key.length);const eq=rest.indexOf("=");if(eq<0)return "";const tail=rest.slice(eq+1).trim();const quote=tail[0];if(quote!==String.fromCharCode(34)&&quote!==String.fromCharCode(39))return "";const end=tail.indexOf(quote,1);return end>0?tail.slice(1,end):""};
- let url=extractQuoted(html,"videoUrl");
+ const pick=(key:string)=>{
+  const patterns=[key+"=",key+":","var "+key+"=","let "+key+"=","const "+key+"="];
+  for(const marker of patterns){
+   const p=html.indexOf(marker);if(p<0)continue;
+   const tail=html.slice(p+marker.length).trim();
+   const q=tail[0];
+   if(q==='"'||q==="'"){const e=tail.indexOf(q,1);if(e>0)return tail.slice(1,e)}
+  }
+  return "";
+ };
+ let url=pick("videoUrl");
  if(!url){
-  const directMarkers=["https://","http://"];
-  for(const marker of directMarkers){const p=html.indexOf(marker);if(p>=0){const tail=html.slice(p);const end=tail.search(/[\"'\\s<>]/);const candidate=(end>0?tail.slice(0,end):tail).trim();if(/\\.(m3u8|mp4)(\\?|$)/i.test(candidate)){url=candidate;break}}}
+  const m=html.match(/https?:[^"'\\s<>]+/g)||[];
+  url=m.map(x=>x.replace(/\\u0026/g,"&").replace(/\\u002F/g,"/")).find(x=>/\.(m3u8|mp4)(\?|$)/i.test(x))||"";
  }
  if(!url)throw new Error("Aksor: ссылка видео не найдена");
  url=url.replaceAll("\\u0026","&").replaceAll("\\u002F","/");
@@ -27,35 +36,44 @@ async function resolveKodik(rawIframeUrl:string){
  const iframeUrl=rawIframeUrl.startsWith("//")?"https:"+rawIframeUrl:rawIframeUrl;
  let parsed:URL;
  try{parsed=new URL(iframeUrl)}catch{throw new Error("Kodik вернул некорректный URL")}
- const parts=parsed.pathname.split("/").filter(Boolean);
- if(parts.length<3)throw new Error("Kodik: не удалось разобрать ссылку серии");
- const type=parts[0],id=parts[1],hash=parts[2];
- if(!/^\d+$/.test(id)||!/^[0-9a-z]+$/i.test(hash))throw new Error("Kodik: некорректные id/hash серии");
- const params=new URLSearchParams({type,id,hash});
- const page=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Accept":"text/html,*/*","Referer":"https://yummyani.me/"},cache:"no-store"});
+ const page=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Accept":"text/html,*/*","Referer":"https://yummyani.me/","Accept-Language":"ru-RU,ru;q=0.9"},cache:"no-store"});
  const html=await page.text();
- let endpoint="/kor";
- const playerMatch=html.match(/<script[^>]+src=["']([^"']*player_single[^"']*\.js)["']/i);
- if(playerMatch?.[1]){
+ if(!page.ok)throw new Error(`Kodik page: HTTP ${page.status}`);
+ const getVar=(name:string)=>{
+  const m=html.match(new RegExp("vInfo\\\\."+name+"\\\\s*=\\\\s*['\\\"]([^'\\\"]+)['\\\"]"));
+  return m?.[1]||"";
+ };
+ const urlParamsMatch=html.match(/var\\s+urlParams\\s*=\\s*['\"]([^'\"]+)['\"]/);
+ let urlParams:any={};
+ if(urlParamsMatch?.[1]){try{urlParams=JSON.parse(urlParamsMatch[1])}catch{}}
+ const parts=parsed.pathname.split("/").filter(Boolean);
+ const type=getVar("type")||parts[0]||"seria";
+ const id=getVar("id")||parts[1]||"";
+ const hash=getVar("hash")||parts[2]||"";
+ if(!id||!hash)throw new Error("Kodik: не удалось разобрать id/hash серии");
+ let endpoint="";
+ const scripts=Array.from(html.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/gi)).map(m=>m[1]);
+ for(const src of scripts){
   try{
-   const playerUrl=new URL(playerMatch[1],parsed.origin);
-   const js=await (await fetch(playerUrl.toString(),{headers:{"User-Agent":UA,"Referer":iframeUrl},cache:"no-store"})).text();
-   const b64=js.match(/type:["']POST["'],url:atob\(["']([^"']+)["']\)/i)?.[1];
-   if(b64){const discovered=Buffer.from(b64,"base64").toString("utf8").trim();if(discovered)endpoint=discovered}
+   const js=await (await fetch(new URL(src,parsed.origin).toString(),{headers:{"User-Agent":UA,"Referer":iframeUrl},cache:"no-store"})).text();
+   const b64=js.match(/url:atob\\(["']([^"']+)["']\\)/i)?.[1];
+   if(b64){const decoded=Buffer.from(b64,"base64").toString("utf8").trim();if(decoded.startsWith("/")){endpoint=decoded;break}}
   }catch{}
  }
+ if(!endpoint)endpoint="/ftor";
+ const data=new URLSearchParams();
+ for(const k of ["d","d_sign","pd","pd_sign","ref","ref_sign"]){if(urlParams[k]!=null)data.set(k,decodeURIComponent(String(urlParams[k])));}
+ data.set("bad_user","false");data.set("cdn_is_working","true");data.set("info","{}");data.set("type",type);data.set("hash",hash);data.set("id",id);
  const endpointUrl=new URL(endpoint,parsed.origin);
- const response=await fetch(endpointUrl.toString()+"?"+params.toString(),{headers:{"User-Agent":UA,"Referer":iframeUrl,"Accept":"application/json,text/plain,*/*"},cache:"no-store"});
+ const response=await fetch(endpointUrl.toString(),{method:"POST",headers:{"User-Agent":UA,"Referer":iframeUrl,"Origin":parsed.origin,"Accept":"application/json,text/javascript,*/*","Content-Type":"application/x-www-form-urlencoded; charset=UTF-8","X-Requested-With":"XMLHttpRequest"},body:data.toString(),cache:"no-store"});
  const body=await response.text();
  if(!response.ok)throw new Error(`Kodik resolver: HTTP ${response.status} (${endpointUrl.pathname})`);
- if(body.trimStart().startsWith("<"))throw new Error(`Kodik resolver вернул HTML вместо JSON (${endpointUrl.pathname})`);
- let json:any;try{json=JSON.parse(body)}catch{throw new Error(`Kodik resolver вернул некорректный JSON (${endpointUrl.pathname})`)}
+ let json:any;try{json=JSON.parse(body)}catch{throw new Error("Kodik resolver вернул некорректный JSON")};
  const out:{quality:string,url:string}[]=[];
  for(const [q,arr] of Object.entries(json?.links||{})){
-  const item:any=Array.isArray(arr)?arr[0]:null;
-  if(!item?.src)continue;
+  const item:any=Array.isArray(arr)?arr[0]:null;if(!item?.src)continue;
   const shifted=String(item.src).replace(/[a-zA-Z]/g,ch=>{let n=ch.charCodeAt(0)+18;const max=ch<="Z"?90:122;if(n>max)n-=26;return String.fromCharCode(n)});
-  try{const url=Buffer.from(shifted,"base64").toString("utf8");if(url.startsWith("http://")||url.startsWith("https://"))out.push({quality:q,url})}catch{}
+  try{const url=Buffer.from(shifted,"base64").toString("utf8");if(url.startsWith("http://")||url.startsWith("https://")||url.startsWith("//"))out.push({quality:q,url:url.startsWith("//")?"https:"+url:url})}catch{}
  }
  if(!out.length)throw new Error("Kodik: resolver не вернул видеопоток");
  return out;
