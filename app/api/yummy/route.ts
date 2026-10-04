@@ -9,7 +9,7 @@ function decodeSrc(src:string){try{return Buffer.from(rot13(src),"base64").toStr
 async function resolveKodik(rawIframeUrl:string){
  const iframeUrl=rawIframeUrl.startsWith("//")?"https:"+rawIframeUrl:rawIframeUrl;
  let parsed:URL; try{parsed=new URL(iframeUrl)}catch{throw new Error("Kodik вернул некорректный URL источника")}
- const frame=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Accept":"text/html,*/*"}});
+ const frame=await fetch(parsed.toString(),{headers:{"User-Agent":UA,"Accept":"text/html,*/*","Referer":"https://yummyani.me/"}});
  const html=await frame.text(); const params:Record<string,string>={};
  for(const m of html.matchAll(/([a-zA-Z0-9_]+?)\s?=\s?["']([^'"]+?)["']/g))params[m[1]]=m[2];
  const hash=html.match(/videoInfo\.hash\s*=\s*["'](.+?)["']/); if(hash)params.hash=hash[1];
