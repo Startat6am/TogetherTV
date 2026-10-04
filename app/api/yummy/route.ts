@@ -26,6 +26,8 @@ async function inspectAksorSource(url:string,referer:string){
   const signature=buf.subarray(0,16).toString("hex");
   const looksManifest=head.trimStart().startsWith("#EXTM3U")||type.includes("mpegurl");
   if(looksManifest)return "m3u8";
+  const looksDash=/^\\s*(?:<\\?xml[^>]*>\\s*)?<MPD\\b/i.test(head);
+  if(looksDash||type.includes("dash+xml"))return "mpd";
   const isIsoBmff=ftyp==="ftyp" && buf.length>=12; const hasMoov=buf.includes(Buffer.from("moov")); const hasMdat=buf.includes(Buffer.from("mdat")); if(isIsoBmff && (hasMoov||hasMdat) && (buf.length>=8192 || contentRange.includes("/")))return "mp4";
   if(type.includes("application/octet-stream")&&isIsoBmff&&buf.length>=8192)return "mp4";
   const looksText=/^(<!doctype\s+html|<html|\s*[{[]|#EXTM3U|Access Denied|Forbidden)/i.test(head);
@@ -42,7 +44,7 @@ async function resolveAksor(raw:string){
  for(const [quality,key] of [["360p","q360"],["480p","q480"],["720p","q720"],["1080p","q1080"],["2K","q2k"],["4K","q4k"]]){const url=decodeHtmlUrl(String(q[key]||"").trim()).replace(/ /g,"%20");if(url&&url.toLowerCase()!=="null"&&/^https?:\/\//i.test(url))out.push({quality,url})}
  if(!out.length)throw new Error("Aksor: API не вернул ссылок видео");
  const checked:any[]=[],diagnostics:string[]=[];
- for(const source of out){const kind=await inspectAksorSource(source.url,full);const diagnostic={quality:source.quality,result:kind.startsWith("bad:")?"rejected":kind==="mp4"||kind==="m3u8"?"ok":"error",details:kind.startsWith("bad:")?kind.slice(4):kind};console.info("[TogetherTV Aksor probe]",JSON.stringify(diagnostic));if(kind==="m3u8"||kind==="mp4")checked.push({...source,kind});else diagnostics.push(`${source.quality}: ${kind}`)}
+ for(const source of out){const kind=await inspectAksorSource(source.url,full);const diagnostic={quality:source.quality,result:kind.startsWith("bad:")?"rejected":kind==="mp4"||kind==="m3u8"?"ok":"error",details:kind.startsWith("bad:")?kind.slice(4):kind};console.info("[TogetherTV Aksor probe]",JSON.stringify(diagnostic));if(kind==="m3u8"||kind==="mp4"||kind==="mpd")checked.push({...source,kind});else diagnostics.push(`${source.quality}: ${kind}`)}
  if(!checked.length){console.error("[TogetherTV Aksor failure]",JSON.stringify({videoId:hash,sourceCount:out.length,diagnostics}));throw new Error("Aksor диагностика — "+diagnostics.join(" | "))}
  return checked
 }
