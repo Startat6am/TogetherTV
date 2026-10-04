@@ -69,7 +69,7 @@ export async function GET(req:NextRequest){
     // Aksor CDN may return a tiny 206/200 challenge unless the publisher Referer is used.
     const isTiny=(response:Response)=>{
       const cr=response.headers.get("content-range")||"";
-      const match=/^bytes\s+\d+-\d+\/(\d+)$/i.exec(cr);
+      const match=/^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(cr);
       const total=match?Number(match[1]):0;
       const length=Number(response.headers.get("content-length")||0);
       return (total>0&&total<1024*1024)||(length>0&&length<1024*1024);
