@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
+import dashjs from "dashjs";
 
 type State={url:string;playing:boolean;position:number;updatedAt:number;title:string};
 type Anime=Record<string,any>;
@@ -20,7 +21,7 @@ export default function Home(){
  useEffect(()=>{fetch("/api/yummy",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"config"}),cache:"no-store"}).then(r=>r.ok?r.json():null).then(x=>setServerKeysConfigured(Boolean(x?.configured))).catch(()=>setServerKeysConfigured(false))},[]);
  useEffect(()=>{const load=async()=>{try{const r=await fetch("/api/state?room="+encodeURIComponent(room),{cache:"no-store"});if(r.ok){const x=await r.json();if(x.state)setState(x.state)}}catch{}};load();const id=setInterval(load,700);return()=>clearInterval(id)},[room]);
  useEffect(()=>{const v=video.current;if(!v||!state.url)return;const p=state.playing?state.position+(Date.now()-state.updatedAt)/1000:state.position;if(Math.abs(v.currentTime-p)>0.8)v.currentTime=Math.max(0,p);if(state.playing)v.play().catch(()=>{}) ;else v.pause()},[state]);
- useEffect(()=>{const v=video.current;if(!v||!state.url)return;let hls:Hls|null=null;setPlayerError("");setPlayerStatus("Загружаю серию…");const onLoaded=()=>setPlayerStatus("Серия загружена ✓");const onWaiting=()=>setPlayerStatus("Буферизация…");const onPlaying=()=>setPlayerStatus("▶ Воспроизводится");const onError=()=>{const e=v.error;setPlayerError(e?.message?`Плеер: ${e.message}`:"Плеер не смог загрузить поток")};v.addEventListener("loadeddata",onLoaded);v.addEventListener("waiting",onWaiting);v.addEventListener("playing",onPlaying);v.addEventListener("error",onError);if(/\.m3u8/i.test(state.url)||/[?&]type=m3u8(?:&|$)/i.test(state.url)){
+ useEffect(()=>{const v=video.current;if(!v||!state.url)return;let hls:Hls|null=null;let dash:dashjs.MediaPlayerClass|null=null;setPlayerError("");setPlayerStatus("Загружаю серию…");const onLoaded=()=>setPlayerStatus("Серия загружена ✓");const onWaiting=()=>setPlayerStatus("Буферизация…");const onPlaying=()=>setPlayerStatus("▶ Воспроизводится");const onError=()=>{const e=v.error;setPlayerError(e?.message?`Плеер: ${e.message}`:"Плеер не смог загрузить поток")};v.addEventListener("loadeddata",onLoaded);v.addEventListener("waiting",onWaiting);v.addEventListener("playing",onPlaying);v.addEventListener("error",onError);if(/\.m3u8/i.test(state.url)||/[?&]type=m3u8(?:&|$)/i.test(state.url)){
   if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=state.url;v.load()}
   else if(Hls.isSupported()){
    hls=new Hls({enableWorker:true,maxBufferLength:30,backBufferLength:30});
@@ -32,7 +33,7 @@ export default function Home(){
     else setPlayerError("HLS: поток недоступен");
    })
   }else setPlayerError("Этот браузер не поддерживает HLS")
- }else{v.src=state.url;v.load()}return()=>{v.removeEventListener("loadeddata",onLoaded);v.removeEventListener("waiting",onWaiting);v.removeEventListener("playing",onPlaying);v.removeEventListener("error",onError);hls?.destroy();}},[state.url]);
+ }else{v.src=state.url;v.load()}return()=>{v.removeEventListener("loadeddata",onLoaded);v.removeEventListener("waiting",onWaiting);v.removeEventListener("playing",onPlaying);v.removeEventListener("error",onError);hls?.destroy();dash?.reset();}},[state.url]);
  const publish=async(patch:Partial<State>)=>{const next={...state,...patch,updatedAt:Date.now()};setState(next);await fetch("/api/state?room="+encodeURIComponent(room),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(next)}).catch(()=>{})};
  const pos=()=>video.current?.currentTime||state.position;
  const saveKeys=async()=>{setApiBusy(true);setApiError("");try{const r=await fetch("/api/yummy",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"search",query:"Киберпанк",token:publicKey,privateToken:privateKey})});const x=await r.json();if(!r.ok)throw new Error(x.error||"Ключи не прошли проверку");sessionStorage.setItem("yummy_public",publicKey);sessionStorage.setItem("yummy_private",privateKey);sessionStorage.setItem("yummy_keys_ok","1");setKeysAdded(true)}catch(e){setApiError(e instanceof Error?e.message:"Не удалось проверить ключ")}finally{setApiBusy(false)}};
