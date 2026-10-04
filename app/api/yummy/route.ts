@@ -24,13 +24,13 @@ async function resolveAksor(rawIframeUrl:string){
  if(!response.ok)throw new Error(`Aksor: HTTP ${response.status}`);
 
  // Aksor embeds the actual media URL in: var videoUrl = "..."
- const match=html.match(/var\\s+videoUrl\\s*=\\s*["'](.+?)["']/i);
+ const match=html.match(/var\s+videoUrl\s*=\s*["\']([^"\']+)["\']/i);
  if(!match?.[1])throw new Error("Aksor: videoUrl не найден на странице плеера");
 
  const url=match[1].replaceAll("\\u0026","&");
  if(!url.startsWith("http://")&&!url.startsWith("https://"))throw new Error("Aksor: найден некорректный videoUrl");
 
- const fileMatch=url.match(/\\/(\\d+)\\.(?:mp4|m3u8)(?:$|[?#])/i);
+ const fileMatch=url.match(/\/(\d+)\.(?:mp4|m3u8)(?:$|[?#])/i);
  const quality=fileMatch?.[1]||"auto";
  return [{quality,url}];
 }
