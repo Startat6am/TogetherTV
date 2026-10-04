@@ -10,8 +10,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const token = cleanToken(body?.token);
+    const privateToken = cleanToken(body?.privateToken);
     const action = body?.action;
-    if (!token) return NextResponse.json({ error: "Нужен X-Application" }, { status: 400 });
+    if (!token) return NextResponse.json({ error: "Нужен Public key (X-Application)" }, { status: 400 });
 
     let path = "";
     const params = new URLSearchParams();
@@ -32,12 +33,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Неизвестное действие" }, { status: 400 });
     }
 
+    const headers: Record<string,string> = {
+      "X-Application": token,
+      "Accept": "application/json",
+      "Accept-Language": "ru",
+    };
+    if (privateToken) headers.Authorization = "Bearer " + privateToken;
+
     const response = await fetch(API + path + (params.size ? "?" + params.toString() : ""), {
-      headers: {
-        "X-Application": token,
-        "Accept": "application/json",
-        "Accept-Language": "ru",
-      },
+      headers,
       cache: "no-store",
     });
 
