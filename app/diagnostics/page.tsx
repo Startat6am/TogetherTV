@@ -18,6 +18,7 @@ export default function DiagnosticsPage() {
   const [logs, setLogs] = useState<Probe[]>([]);
   const [error, setError] = useState("");
   const [playingUrl, setPlayingUrl] = useState("");
+  const [autoBusy, setAutoBusy] = useState(false);
 
   const log = (event: string, detail?: string) =>
     setLogs((old) => [{ at: stamp(), event, detail }, ...old].slice(0, 60));
@@ -103,6 +104,8 @@ export default function DiagnosticsPage() {
     }
   };
 
+  const autoCyberpunk = async () => { setAutoBusy(true); setError(""); try { const r = await fetch("/api/yummy",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"cyberpunk"})}); const d=await r.json(); if(!r.ok) throw new Error(d.error || "Не удалось получить Aksor"); setSources(Array.isArray(d.sources)?d.sources:[]); setIframe(d.iframe || ""); } catch(e) { setError(e instanceof Error ? e.message : String(e)); } finally { setAutoBusy(false); } };
+
   const resolveIframe = async () => {
     if (!iframe.trim()) return;
     setBusy(true);
@@ -160,7 +163,7 @@ export default function DiagnosticsPage() {
       </section>
 
       <section style={card}>
-        <h2 style={h2}>2. Проверить resolver YummyAnime / Aksor / Kodik</h2>
+        <h2 style={h2}>2. Киберпанк → AniLibria → Aksor</h2><button style={button} onClick={autoCyberpunk} disabled={autoBusy}>{autoBusy ? "Ищу источник…" : "Найти Aksor автоматически"}</button><p style={{color:"#a1a1aa",fontSize:13}}>Ничего копировать с телефона не нужно.</p>
         <label style={label}>Iframe / URL плеера
           <input value={iframe} onChange={(e) => setIframe(e.target.value)} placeholder="https://… ссылка на страницу плеера" style={input} />
         </label>
