@@ -19,6 +19,12 @@ async function getEntry(token:string){
   return null;
 }
 
+async function saveManifestBase(url:string,referer:string){
+  if(!redis)return "";
+  const token=crypto.randomUUID().replace(/-/g,"");
+  await redis.set(`togethertv:stream:${token}`,JSON.stringify({url,referer,manifestBase:true}),{ex:60*60*3});
+  return `/api/stream?token=${token}&path=`;
+}
 async function saveChild(url:string,referer:string){
   if(!redis)return "";
   const token=crypto.randomUUID().replace(/-/g,"");
@@ -55,6 +61,7 @@ export async function GET(req:NextRequest){
   if(!entry?.url){console.warn("[TogetherTV stream] Stream token unavailable",JSON.stringify({tokenPresent:Boolean(token),redisConfigured:Boolean(redis)}));return new NextResponse("Stream expired",{status:404});}
 
   const range=req.headers.get("range");
+  const path=req.nextUrl.searchParams.get("path");
   let upstream:Response;
   try{
     const headers:Record<string,string>={
@@ -64,7 +71,9 @@ export async function GET(req:NextRequest){
     };
     if(entry.referer)headers.Referer=entry.referer;
     if(range)headers.Range=range;
-    upstream=await fetch(entry.url,{headers,cache:"no-store",redirect:"follow"});
+    let upstreamUrl=entry.url;
+    if(path!==null){try{upstreamUrl=new URL(path.replace(/^\/+/, ""),entry.url.endsWith("/")?entry.url:entry.url+"/").toString()}catch{}}
+    upstream=await fetch(upstreamUrl,{headers,cache:"no-store",redirect:"follow"});
 
     // Aksor CDN may return a tiny 206/200 challenge unless the publisher Referer is used.
     const isTiny=(response:Response)=>{
@@ -134,8 +143,12 @@ export async function GET(req:NextRequest){
       try{
         const base=new URL(entry.url);base.search="";base.hash="";base.pathname=base.pathname.slice(0,base.pathname.lastIndexOf("/")+1);
         const baseUrl=base.toString();
-        text=text.replace(/<BaseURL(\s[^>]*)?>([\s\S]*?)<\/BaseURL>/gi,(_m,attrs,raw)=>`<BaseURL${attrs||""}>${normalizeUrl(raw.trim(),baseUrl)}</BaseURL>`);
-        if(!/<BaseURL(?:\s[^>]*)?>/i.test(text))text=text.replace(/(<MPD\b[^>]*>)/i,`$1<BaseURL>${baseUrl}</BaseURL>`);
+        const proxyBase=await saveManifestBase(baseUrl,entry.referer);
+        if(proxyBase){
+          text=text.replace(/<BaseURL(\s[^>]*)?>([\s\S]*?)<\/BaseURL>/gi,(_m,attrs,raw)=>`<BaseURL${attrs||""}>${proxyBase}${encodeURI(raw.trim()).replace(/%24/g,"$")}</BaseURL>`);
+          if(!/<BaseURL(?:\s[^>]*)?>/i.test(text))text=text.replace(/(<MPD\b[^>]*>)/i,`$1<BaseURL>${proxyBase}</BaseURL>`);
+          text=text.replace(/\b(media|initialization)="([^"]+)"/gi,(_m,key,value)=>/^https?:\/\//i.test(value)?_m:`${key}="${proxyBase}${encodeURI(value).replace(/%24/g,"$")}"`);
+        }
       }catch{}
     }else text=await rewriteManifest(text,entry.url,entry.referer);
     return new NextResponse(text,{status:200,headers:{
