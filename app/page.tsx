@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import * as dashjs from "dashjs";
 
 type State={url:string;playing:boolean;position:number;updatedAt:number;title:string};
 type Anime=Record<string,any>;
@@ -22,7 +21,7 @@ export default function Home(){
  useEffect(()=>{const load=async()=>{try{const r=await fetch("/api/state?room="+encodeURIComponent(room),{cache:"no-store"});if(r.ok){const x=await r.json();if(x.state)setState(x.state)}}catch{}};load();const id=setInterval(load,700);return()=>clearInterval(id)},[room]);
  useEffect(()=>{const v=video.current;if(!v||!state.url)return;const p=state.playing?state.position+(Date.now()-state.updatedAt)/1000:state.position;if(Math.abs(v.currentTime-p)>0.8)v.currentTime=Math.max(0,p);if(state.playing)v.play().catch(()=>{}) ;else v.pause()},[state]);
  useEffect(()=>{const v=video.current;if(!v||!state.url)return;let hls:Hls|null=null;let dash:any=null;setPlayerError("");setPlayerStatus("Загружаю серию…");const onLoaded=()=>setPlayerStatus("Серия загружена ✓");const onWaiting=()=>setPlayerStatus("Буферизация…");const onPlaying=()=>setPlayerStatus("▶ Воспроизводится");const onError=()=>{const e=v.error;setPlayerError(e?.message?`Плеер: ${e.message}`:"Плеер не смог загрузить поток")};v.addEventListener("loadeddata",onLoaded);v.addEventListener("waiting",onWaiting);v.addEventListener("playing",onPlaying);v.addEventListener("error",onError);if(/\.mpd(?:$|[?#])/i.test(state.url)||/[?&]type=mpd(?:&|$)/i.test(state.url)){
-  dash=dashjs.MediaPlayer().create();dash.initialize(v,state.url,false);dash.on(dashjs.MediaPlayer.events.ERROR,(e:any)=>setPlayerError("DASH: "+(e?.error?.message||e?.event?.message||"ошибка загрузки манифеста/сегментов")));
+  import("dashjs").then((dashjs:any)=>{if(!v.isConnected)return;dash=dashjs.MediaPlayer().create();dash.initialize(v,state.url,false);dash.on(dashjs.MediaPlayer.events.ERROR,(e:any)=>setPlayerError("DASH: "+(e?.error?.message||e?.event?.message||"ошибка загрузки манифеста/сегментов")))}).catch(()=>setPlayerError("DASH: не удалось загрузить плеер"));
  }else if(/\.m3u8/i.test(state.url)||/[?&]type=m3u8(?:&|$)/i.test(state.url)){
   if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=state.url;v.load()}
   else if(Hls.isSupported()){
