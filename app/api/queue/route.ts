@@ -1,0 +1,9 @@
+import {NextRequest,NextResponse} from "next/server";
+import {Redis} from "@upstash/redis";
+type Suggestion={id:string;videoId:string;title:string;createdAt:number;participantId:string};
+const memory=new Map<string,Suggestion[]>();
+const room=(req:NextRequest)=>(new URL(req.url).searchParams.get("room")||"main").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80)||"main";
+const key=(r:string)=>`togethertv:room:${r}:queue`;
+function redis(){return process.env.UPSTASH_REDIS_REST_URL&&process.env.UPSTASH_REDIS_REST_TOKEN?Redis.fromEnv():null}
+export async function GET(req:NextRequest){try{const r=room(req),db=redis();const queue=db?await db.get<Suggestion[]>(key(r)):memory.get(r)||[];return NextResponse.json({queue:queue||[]},{headers:{"Cache-Control":"no-store"}})}catch{return NextResponse.json({error:"queue_unavailable"},{status:503})}}
+export async function POST(req:NextRequest){let b:any;try{b=await req.json()}catch{return NextResponse.json({error:"invalid_json"},{status:400})}if(typeof b.videoId!=="string"||!/^[\w-]{11}$/.test(b.videoId)||typeof b.participantId!=="string")return NextResponse.json({error:"bad_suggestion"},{status:400});const r=room(req),db=redis();try{let queue:Suggestion[];if(db){queue=(await db.get<Suggestion[]>(key(r)))||[]}else queue=memory.get(r)||[];if(queue.some(x=>x.videoId===b.videoId))return NextResponse.json({queue,message:"Видео уже есть в очереди"});queue.push({id:crypto.randomUUID(),videoId:b.videoId,title:typeof b.title==="string"?b.title.slice(0,160):"YouTube · "+b.videoId,createdAt:Date.now(),participantId:b.participantId.slice(0,100)});queue=queue.slice(-50);if(db)await db.set(key(r),queue,{ex:86400*7});else memory.set(r,queue);return NextResponse.json({queue},{headers:{"Cache-Control":"no-store"}})}catch{return NextResponse.json({error:"queue_write_failed"},{status:503})}}
