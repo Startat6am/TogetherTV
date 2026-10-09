@@ -10,8 +10,8 @@ function getRoom(){return location.hash.slice(1).replace(/[^a-zA-Z0-9_-]/g,"").s
 function getParticipant(){let id=localStorage.getItem("togethertv-participant");if(!id){id=crypto.randomUUID();localStorage.setItem("togethertv-participant",id)}return id}
 export default function Home(){
  const[room,setRoom]=useState("main"),[state,setState]=useState<RoomState>(EMPTY),[url,setUrl]=useState(""),[title,setTitle]=useState(""),[suggestion,setSuggestion]=useState(""),[queue,setQueue]=useState<{id:string;videoId:string;title:string;createdAt:number}[]>([]),[participantId,setParticipantId]=useState(""),[hostId,setHostId]=useState(""),[error,setError]=useState(""),[notice,setNotice]=useState(""),[connected,setConnected]=useState(false),[ready,setReady]=useState(false);
- const host=useRef<HTMLDivElement>(null),player=useRef<YTPlayer|null>(null),stateRef=useRef<RoomState>(EMPTY),suppress=useRef(0);
- const isHost=!!participantId&&participantId===hostId;
+ const host=useRef<HTMLDivElement>(null),player=useRef<YTPlayer|null>(null),stateRef=useRef<RoomState>(EMPTY),suppress=useRef(0),isHostRef=useRef(false);
+ const isHost=!!participantId&&participantId===hostId;isHostRef.current=isHost;
  useEffect(()=>{setParticipantId(getParticipant());const change=()=>setRoom(getRoom());change();addEventListener("hashchange",change);return()=>removeEventListener("hashchange",change)},[]);
  const loadRoom=useCallback(async()=>{try{const r=await fetch("/api/state?room="+encodeURIComponent(room),{cache:"no-store"});if(!r.ok)throw Error();const x=await r.json();setConnected(true);setHostId(x.hostId||"");if(x.state&&x.state.updatedAt>=stateRef.current.updatedAt){stateRef.current=x.state;setState(x.state)}}catch{setConnected(false);setError("Соединение с комнатой потеряно. Повторяем подключение…")}},[room]);
  useEffect(()=>{stateRef.current=EMPTY;setState(EMPTY);void loadRoom();const t=setInterval(loadRoom,1000);return()=>clearInterval(t)},[loadRoom]);
